@@ -105,6 +105,7 @@ class PytdxFetcher(BaseFetcher):
     
     name = "PytdxFetcher"
     priority = int(os.getenv("PYTDX_PRIORITY", "2"))
+    enabled = os.getenv("PYTDX_ENABLED", "true").lower() not in ("false", "0", "no")
     
     # 默认通达信行情服务器列表
     DEFAULT_HOSTS = [
@@ -363,13 +364,17 @@ class PytdxFetcher(BaseFetcher):
     def get_stock_name(self, stock_code: str) -> Optional[str]:
         """
         获取股票名称
-        
+
         Args:
             stock_code: 股票代码
-            
+
         Returns:
             股票名称，失败返回 None
         """
+        # 如果Pytdx被禁用，直接返回None让其他数据源处理
+        if not self.enabled:
+            return None
+
         # 港股不支持（pytdx 不含港股数据）
         if _is_hk_market(stock_code):
             return None
@@ -407,13 +412,16 @@ class PytdxFetcher(BaseFetcher):
     def get_realtime_quote(self, stock_code: str) -> Optional[dict]:
         """
         获取实时行情
-        
+
         Args:
             stock_code: 股票代码
-            
+
         Returns:
             实时行情数据字典，失败返回 None
         """
+        if not self.enabled:
+            return None
+
         if is_bse_code(stock_code):
             raise DataFetchError(
                 f"PytdxFetcher 不支持北交所 {stock_code}，将自动切换其他数据源"
