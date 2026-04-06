@@ -263,15 +263,19 @@ class PytdxFetcher(BaseFetcher):
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
         从通达信获取原始数据
-        
+
         使用 get_security_bars() 获取日线数据
-        
+
         流程：
         1. 检查是否为美股（不支持）
         2. 使用上下文管理器管理连接
         3. 判断市场代码
         4. 调用 API 获取 K 线数据
         """
+        # PYTDX_ENABLED=false 时直接跳过，避免连接超时拖慢整体流程
+        if not self.enabled:
+            raise DataFetchError("PytdxFetcher 已禁用（PYTDX_ENABLED=false），跳过")
+
         # 美股不支持，抛出异常让 DataFetcherManager 切换到其他数据源
         if _is_us_code(stock_code):
             raise DataFetchError(f"PytdxFetcher 不支持美股 {stock_code}，请使用 AkshareFetcher 或 YfinanceFetcher")
