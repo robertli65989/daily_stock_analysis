@@ -766,6 +766,78 @@ class NotificationService(
             self._get_report_language(result),
         )
     
+    def _generate_rotation_directive(
+        self,
+        results: List[AnalysisResult],
+        config,
+    ) -> List[str]:
+        """生成ETF轮动操作指令模块，输出今日买入标的和仓位建议。"""
+        total_capital = getattr(config, 'total_capital', 20000)
+
+        # 候选：decision_type == 'buy'，按 sentiment_score 降序，最多取3个
+        buy_candidates = sorted(
+            [r for r in results if getattr(r, 'decision_type', '') == 'buy'],
+            key=lambda x: x.sentiment_score,
+            reverse=True,
+        )[:3]
+
+        n = len(buy_candidates)
+
+        # 仓位状态判断
+        if n == 0:
+            position_label = "空仓"
+            position_note = "当前无买入信号，建议全部观望，等待机会。"
+        elif n == 1:
+            position_label = "半仓"
+            position_note = f"仅1个买入信号，建议半仓介入，另一半现金观望。"
+        else:
+            position_label = "满仓"
+            position_note = f"共{n}个买入信号，建议满仓分散持有。"
+
+        lines = [
+            "## 🚀 今日操作指令",
+            "",
+            f"**仓位状态：{position_label}**　　总资金：¥{total_capital:,}",
+            "",
+        ]
+
+        if n == 0:
+            lines += [
+                f"> {position_note}",
+                "",
+                "---",
+                "",
+            ]
+            return lines
+
+        # 计算每个仓位金额
+        if n == 1:
+            amounts = [total_capital // 2]
+        else:
+            per_pos = total_capital // n
+            amounts = [per_pos] * n
+
+        lines += ["| 操作 | 代码 | 名称 | 综合评分 | 建议金额 |",
+                  "|------|------|------|---------|---------|"]
+
+        for r, amt in zip(buy_candidates, amounts):
+            name = getattr(r, 'name', '') or r.code
+            score = r.sentiment_score
+            lines.append(f"| 🟢 买入 | {r.code} | {name} | {score}/100 | ¥{amt:,} |")
+
+        cash_left = total_capital - sum(amounts)
+        if cash_left > 0:
+            lines.append(f"| 💰 现金 | — | 观望 | — | ¥{cash_left:,} |")
+
+        lines += [
+            "",
+            f"> {position_note}",
+            "",
+            "---",
+            "",
+        ]
+        return lines
+
     def generate_dashboard_report(
         self,
         results: List[AnalysisResult],
@@ -825,6 +897,9 @@ class NotificationService(
             f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
             "",
         ]
+
+        # === ETF轮动操作指令 ===
+        report_lines.extend(self._generate_rotation_directive(results, config))
 
         # === 新增：分析结果摘要 (Issue #112) ===
         if results:
