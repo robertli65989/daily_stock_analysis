@@ -671,6 +671,11 @@ class StockAnalysisPipeline:
         enhanced['is_index_etf'] = SearchService.is_index_or_etf(
             context.get('code', ''), enhanced.get('stock_name', stock_name)
         )
+        # ETF sector keywords for industry-focused news search and analysis
+        if enhanced['is_index_etf']:
+            enhanced['etf_sector_keywords'] = SearchService.get_etf_sector_keywords(
+                context.get('code', '')
+            )
 
         # P0: append unified fundamental block; keep as additional context only
         enhanced["fundamental_context"] = (

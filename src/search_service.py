@@ -2146,6 +2146,81 @@ class SearchService:
     _A_ETF_PREFIXES = ('51', '52', '56', '58', '15', '16', '18')
     _ETF_NAME_KEYWORDS = ('ETF', 'FUND', 'TRUST', 'INDEX', 'TRACKER', 'UNIT')  # US/HK ETF name hints
 
+    # ETF code -> sector search keywords mapping for better news search
+    _ETF_SECTOR_KEYWORDS: dict = {
+        # 宽基
+        '510050': '上证50 大盘蓝筹 白马股',
+        '510300': '沪深300 核心资产 大盘走势',
+        '510500': '中证500 中盘股 价值成长',
+        '159845': '中证1000 小盘股 成长',
+        '159915': '创业板 成长股 科技股',
+        '588000': '科创板 硬科技 半导体 创新',
+        '159792': '科创创业 双创 成长科技',
+        '510880': '高股息 红利股 价值投资',
+        '512890': '红利低波 防御 稳定收益',
+        '159659': '中证A50 核心资产 龙头股',
+        # 金融
+        '512800': '银行 金融政策 利率 信贷 存款准备金',
+        '512000': '证券 券商 资本市场 牛市',
+        '512070': '保险 寿险 财险 利率',
+        '515000': '房地产 地产政策 楼市 限购',
+        # 消费
+        '159928': '消费 零售 内需 消费复苏',
+        '512690': '白酒 酒类 食品饮料 茅台',
+        '515210': '农业 农林牧渔 粮食 猪价',
+        # 医药医疗
+        '512010': '医疗 医院 医疗服务 医改',
+        '159929': '医药 创新药 CXO 集采',
+        '159883': '医疗器械 IVD 耗材集采',
+        # 科技互联网AI
+        '512480': '半导体 芯片 集成电路 国产替代',
+        '515880': '通信 5G 电信 基站',
+        '516110': '互联网 平台经济 科技 反垄断',
+        '515390': '人工智能 AI 大模型 算力',
+        '516350': '云计算 数字经济 SaaS 信创',
+        # 新能源
+        '515790': '光伏 太阳能 新能源 装机量',
+        '516160': '新能源汽车 电动车 锂电池 充电桩',
+        '562500': '储能 电池 钠电池 液流电池',
+        '516950': '新基建 5G 数据中心 东数西算',
+        # 军工国防
+        '512660': '军工 国防 航空航天 武器装备 军费',
+        # 周期能源资源
+        '516970': '有色金属 铜 铝 锂 稀土 金属价格',
+        '515220': '煤炭 动力煤 焦煤 能源价格',
+        '561150': '石油 天然气 原油价格 能源',
+        '516220': '化工 石化 化学品 化工品价格',
+        '159629': '钢铁 铁矿石 黑色金属 螺纹钢',
+        '519671': '电力 公用事业 水电 火电 电价',
+        # 制造消费品
+        '159996': '家电 白色家电 家用电器 以旧换新',
+        '159786': '建材 水泥 玻璃 建筑材料 基建',
+        # 传媒文化
+        '512980': '传媒 影视 游戏 文化 院线',
+        # 港股
+        '513060': '恒生科技 港股科技 腾讯 阿里 美团',
+        '513050': '中概股 互联网 海外中资股',
+        '513180': '恒生指数 港股 香港市场',
+        # 海外
+        '513100': '纳斯达克 美股科技 英伟达 AI',
+        '513500': '标普500 美股 全球资产配置',
+        # 债券
+        '511010': '国债 债券 利率 货币政策',
+        '511090': '短债 货币 流动性 资金面',
+        # 商品
+        '518880': '黄金 避险 贵金属 美元',
+        '162411': '石油 油气 全球能源 原油',
+        # 其他
+        '159901': '深证100 深市蓝筹 深市龙头',
+        '515580': '稀土 稀有金属 磁材',
+    }
+
+    @staticmethod
+    def get_etf_sector_keywords(stock_code: str) -> str:
+        """获取ETF对应的行业关键词，用于搜索行业新闻而非ETF本身"""
+        code = (stock_code or '').strip().split('.')[0]
+        return SearchService._ETF_SECTOR_KEYWORDS.get(code, '')
+
     @staticmethod
     def is_index_or_etf(stock_code: str, stock_name: str) -> bool:
         """
@@ -2834,17 +2909,25 @@ class SearchService:
                 },
             ]
         else:
+            # 获取ETF对应的行业关键词
+            sector_kw = SearchService.get_etf_sector_keywords(stock_code) if is_index_etf else ''
             search_dimensions = [
                 {
                     'name': 'latest_news',
-                    'query': f"{stock_name} {stock_code} 最新 新闻 重大 事件",
+                    'query': (
+                        f"{sector_kw} 最新动态 政策 行业消息"
+                        if (is_index_etf and sector_kw) else f"{stock_name} {stock_code} 最新 新闻 重大 事件"
+                    ),
                     'desc': '最新消息',
                     'tavily_topic': 'news',
                     'strict_freshness': True,
                 },
                 {
                     'name': 'market_analysis',
-                    'query': f"{stock_name} 研报 目标价 评级 深度分析",
+                    'query': (
+                        f"{sector_kw} 板块行情 机构观点 研报"
+                        if (is_index_etf and sector_kw) else f"{stock_name} 研报 目标价 评级 深度分析"
+                    ),
                     'desc': '机构分析',
                     'tavily_topic': None,
                     'strict_freshness': False,
@@ -2852,40 +2935,48 @@ class SearchService:
                 {
                     'name': 'risk_check',
                     'query': (
+                        f"{sector_kw} 利空 风险 政策压制 监管"
+                        if (is_index_etf and sector_kw) else
                         f"{stock_name} 指数走势 跟踪误差 净值 表现"
                         if is_index_etf else f"{stock_name} 减持 处罚 违规 诉讼 利空 风险"
                     ),
                     'desc': '风险排查',
-                    'tavily_topic': None if is_index_etf else 'news',
-                    'strict_freshness': not is_index_etf,
+                    'tavily_topic': 'news',
+                    'strict_freshness': True,
                 },
                 {
                     'name': 'announcements',
                     'query': (
+                        f"{sector_kw} 政策 产业扶持 补贴 利好"
+                        if (is_index_etf and sector_kw) else
                         f"{stock_name} {stock_code} 公告 指数调整 成分变化"
                         if is_index_etf else f"{stock_name} {stock_code} 公司公告 重要公告 上交所 深交所 cninfo"
                     ),
-                    'desc': '公司公告',
+                    'desc': '政策利好',
                     'tavily_topic': 'news',
                     'strict_freshness': True,
                 },
                 {
                     'name': 'earnings',
                     'query': (
+                        f"{sector_kw} 景气度 需求 供给 基本面"
+                        if (is_index_etf and sector_kw) else
                         f"{stock_name} 指数成分 净值 跟踪表现"
                         if is_index_etf else f"{stock_name} 业绩预告 财报 营收 净利润 同比增长"
                     ),
-                    'desc': '业绩预期',
+                    'desc': '景气度',
                     'tavily_topic': None,
                     'strict_freshness': False,
                 },
                 {
                     'name': 'industry',
                     'query': (
+                        f"{sector_kw} 行业趋势 中长期展望 产业链"
+                        if (is_index_etf and sector_kw) else
                         f"{stock_name} 指数成分股 行业配置 权重"
                         if is_index_etf else f"{stock_name} 所在行业 竞争对手 市场份额 行业前景"
                     ),
-                    'desc': '行业分析',
+                    'desc': '行业趋势',
                     'tavily_topic': None,
                     'strict_freshness': False,
                 },

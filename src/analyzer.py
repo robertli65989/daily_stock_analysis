@@ -1714,12 +1714,16 @@ class GeminiAnalyzer:
 请为 **{stock_name}({code})** 生成【决策仪表盘】，严格按照 JSON 格式输出。
 """
         if context.get('is_index_etf'):
-            prompt += """
+            etf_sector = context.get('etf_sector_keywords', '')
+            sector_hint = f"\n> - 该ETF跟踪板块关键词：**{etf_sector}**，请重点分析该板块的行业趋势和催化剂" if etf_sector else ''
+            prompt += f"""
 > ⚠️ **指数/ETF 分析约束**：该标的为指数跟踪型 ETF 或市场指数。
-> - 风险分析仅关注：**指数走势、跟踪误差、市场流动性**
+> - 风险分析仅关注：**板块行业趋势、政策面、资金面、市场情绪**
 > - 严禁将基金公司的诉讼、声誉、高管变动纳入风险警报
-> - 业绩预期基于**指数成分股整体表现**，而非基金公司财报
+> - 业绩预期基于**板块整体景气度和行业基本面**，而非基金公司财报
 > - `risk_alerts` 中不得出现基金管理人相关的公司经营风险
+> - 利好催化应关注：**行业政策、景气度拐点、资金流入、板块轮动机会**{sector_hint}
+> - 舆情分析应总结该板块的行业动态，而非ETF产品本身的新闻
 
 """
         prompt += f"""
