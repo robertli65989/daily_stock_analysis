@@ -771,37 +771,80 @@ class NotificationService(
         results: List[AnalysisResult],
         config,
     ) -> List[str]:
-        """生成ETF轮动操作指令模块，输出今日买入标的和仓位建议。"""
+        """生成ETF轮动操作指令模块，整合大盘择时（RSRS+鳄鱼线）和个股买入建议。"""
         total_capital = getattr(config, 'total_capital', 20000)
 
-        # 候选：decision_type == 'buy'，按 sentiment_score 降序，最多取3个
+        # ── 大盘择时信号 ──────────────────────────────────────
+        timing = {"final_position": 2, "summary": "", "error": "未运行",
+                  "rsrs_signal": None, "alligator_state": "neutral",
+                  "jaw": None, "teeth": None, "lips": None}
+        try:
+            from src.core.market_timing import get_market_timing
+            timing = get_market_timing()
+        except Exception as e:
+            timing["error"] = str(e)
+
+        final_pos  = timing.get("final_position", 2)   # 0=空仓 1=半仓 2=满仓
+        rsrs_val   = timing.get("rsrs_signal")
+        ali_state  = timing.get("alligator_state", "neutral")
+        timing_err = timing.get("error")
+
+        ali_emoji = {"bull": "🐊饥饿（多头）", "bear": "🐊吃饱（空头）",
+                     "neutral": "🐊沉睡（震荡）"}.get(ali_state, ali_state)
+        rsrs_str = f"{rsrs_val:.3f}" if rsrs_val is not None else "N/A"
+
+        # ── 个股ETF候选 ──────────────────────────────────────
         buy_candidates = sorted(
             [r for r in results if getattr(r, 'decision_type', '') == 'buy'],
             key=lambda x: x.sentiment_score,
             reverse=True,
         )[:3]
+        etf_n = len(buy_candidates)
 
-        n = len(buy_candidates)
-
-        # 仓位状态判断
-        if n == 0:
-            position_label = "空仓"
-            position_note = "当前无买入信号，建议全部观望，等待机会。"
-        elif n == 1:
-            position_label = "半仓"
-            position_note = f"仅1个买入信号，建议半仓介入，另一半现金观望。"
+        # ── 综合仓位决策 ─────────────────────────────────────
+        # 大盘强制空仓时，ETF信号无效
+        if final_pos == 0:
+            position_label = "🔴 空仓"
+            position_note  = timing.get("summary", "大盘择时空仓，ETF全部观望")
+            effective_n    = 0
+        elif final_pos == 1:
+            # 半仓：最多持1个ETF
+            position_label = "🟡 半仓"
+            position_note  = timing.get("summary", "大盘信号不一致，半仓谨慎操作")
+            effective_n    = min(etf_n, 1)
         else:
-            position_label = "满仓"
-            position_note = f"共{n}个买入信号，建议满仓分散持有。"
+            # 满仓：最多持3个ETF
+            if etf_n == 0:
+                position_label = "🟡 观望"
+                position_note  = "大盘看多，但今日无ETF买入信号，持仓观望"
+            elif etf_n == 1:
+                position_label = "🟢 半仓"
+                position_note  = "大盘看多，仅1个ETF信号，建议半仓介入"
+            else:
+                position_label = "🟢 满仓"
+                position_note  = f"大盘看多，{etf_n}个ETF信号，满仓分散持有"
+            effective_n = etf_n
 
         lines = [
             "## 🚀 今日操作指令",
             "",
             f"**仓位状态：{position_label}**　　总资金：¥{total_capital:,}",
             "",
+            "**大盘择时指标**",
+            f"- RSRS钝化值：`{rsrs_str}`（>0.7满仓｜<-0.7空仓）",
+            f"- 鳄鱼线状态：{ali_emoji}",
         ]
 
-        if n == 0:
+        if timing.get("jaw") and timing.get("teeth") and timing.get("lips"):
+            lines.append(
+                f"- 三线数值：下颚 {timing['jaw']} ｜ 牙齿 {timing['teeth']} ｜ 上唇 {timing['lips']}"
+            )
+        if timing_err:
+            lines.append(f"- ⚠️ 择时计算备注：{timing_err}")
+
+        lines += [""]
+
+        if effective_n == 0:
             lines += [
                 f"> {position_note}",
                 "",
@@ -810,18 +853,18 @@ class NotificationService(
             ]
             return lines
 
-        # 计算每个仓位金额
-        if n == 1:
-            amounts = [total_capital // 2]
-        else:
-            per_pos = total_capital // n
-            amounts = [per_pos] * n
+        # 计算各仓位金额
+        capital_to_use = total_capital if final_pos == 2 else total_capital // 2
+        selected = buy_candidates[:effective_n]
+        per_pos  = capital_to_use // effective_n
+        amounts  = [per_pos] * effective_n
 
-        lines += ["| 操作 | 代码 | 名称 | 综合评分 | 建议金额 |",
-                  "|------|------|------|---------|---------|"]
+        lines += ["**ETF买入建议**", ""]
+        lines += ["| 操作 | 代码 | 名称 | AI评分 | 建议金额 |",
+                  "|------|------|------|--------|---------|"]
 
-        for r, amt in zip(buy_candidates, amounts):
-            name = getattr(r, 'name', '') or r.code
+        for r, amt in zip(selected, amounts):
+            name  = getattr(r, 'name', '') or r.code
             score = r.sentiment_score
             lines.append(f"| 🟢 买入 | {r.code} | {name} | {score}/100 | ¥{amt:,} |")
 
