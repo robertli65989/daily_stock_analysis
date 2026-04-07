@@ -1679,11 +1679,11 @@ class Config:
     def _parse_report_type(cls, value: str) -> str:
         """Parse REPORT_TYPE, fallback to simple for invalid values (supports brief)."""
         v = (value or 'simple').strip().lower()
-        if v in ('simple', 'full', 'brief'):
+        if v in ('simple', 'full', 'brief', 'etf_rotation'):
             return v
         import logging
         logging.getLogger(__name__).warning(
-            f"REPORT_TYPE '{value}' invalid, fallback to 'simple' (valid: simple/full/brief)"
+            f"REPORT_TYPE '{value}' invalid, fallback to 'simple' (valid: simple/full/brief/etf_rotation)"
         )
         return 'simple'
 

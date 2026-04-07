@@ -1320,6 +1320,8 @@ class StockAnalysisPipeline:
             report_type = ReportType.BRIEF
         elif report_type_str == 'full':
             report_type = ReportType.FULL
+        elif report_type_str == 'etf_rotation':
+            report_type = ReportType.ETF_ROTATION
         else:
             report_type = ReportType.SIMPLE
         # Issue #128: 从配置读取分析间隔
