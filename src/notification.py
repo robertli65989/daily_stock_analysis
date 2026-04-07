@@ -323,28 +323,115 @@ class NotificationService(
         hold_results = [r for r in sorted_results if getattr(r, 'decision_type', '') in ('hold', '')]
         sell_results = [r for r in sorted_results if getattr(r, 'decision_type', '') == 'sell']
 
+        # ── 三重共振评分（AI买入 + 动量前1/3 + 资金净流入）──────
+        n_total = len(results)
+        mo_top  = max(n_total // 3, 5)  # 动量前1/3
+        flow_signal_map = {}
+        if flow_df is not None and not flow_df.empty:
+            for _, row in flow_df.iterrows():
+                flow_signal_map[row["code"]] = row.get("flow_signal", "neutral")
+
+        def resonance(r) -> int:
+            score = 0
+            if getattr(r, 'decision_type', '') == 'buy':
+                score += 1
+            mo_rank = momentum_map.get(r.code, {}).get("rank")
+            if mo_rank is not None and not (isinstance(mo_rank, float) and np.isnan(mo_rank)) and int(mo_rank) <= mo_top:
+                score += 1
+            if flow_signal_map.get(r.code, "") in ("strong_in", "mild_in"):
+                score += 1
+            return score
+
+        resonance_map = {r.code: resonance(r) for r in results}
+
+        # ── 市场一句话定性 ────────────────────────────────────────
+        timing_fp = getattr(self, '_last_timing_final_pos', 1)
+        lm = sentiment.get("limit", {})
+        nb = sentiment.get("northbound", {})
+        if timing_fp == 0:
+            market_status = "⚠️ 大盘空仓信号"
+        elif timing_fp == 2 and lm.get("ratio", 0) >= 3:
+            market_status = "🚀 大盘强势，情绪偏热"
+        elif timing_fp == 2:
+            market_status = "🟢 大盘看多，可积极布局"
+        elif nb.get("today_net", 0) < -5:
+            market_status = "🔴 北向大幅流出，谨慎"
+        elif lm.get("sentiment") in ("恐慌", "偏冷"):
+            market_status = "🟠 市场情绪低迷，观望为主"
+        else:
+            market_status = "🟡 震荡整理，谨慎操作"
+
         lines = [
             f"# 🎯 {report_date} ETF轮动日报",
             "",
-            f"> 共 **{len(results)}** 只 | 🟢买入:{len(buy_results)}  🟡持有:{len(hold_results)}  🔴卖出:{len(sell_results)}",
+            f"> 共 **{len(results)}** 只 | {market_status} | 🟢买入:{len(buy_results)}  🟡持有:{len(hold_results)}  🔴卖出:{len(sell_results)}",
             "",
         ]
 
-        # ── 操作指令（含仓位金额）────────────────────────────────
+        # ── 操作指令 ─────────────────────────────────────────────
         lines.extend(self._generate_rotation_directive(
             results, config,
             momentum_map=momentum_map,
             sentiment=sentiment,
-            flow_summary=getattr(self, '_flow_summary_cache', flow_summary),
+            flow_summary=flow_summary,
+            result_map={r.code: r for r in results},
         ))
-        self._flow_summary_cache = flow_summary  # 暂存供 directive 使用
 
-        # ── 全池速览表（加入动量排名和资金流列）──────────────────
-        has_momentum = bool(momentum_map)
-        has_flow     = bool(flow_map)
+        # ── 今日资金动向（独立模块）──────────────────────────────
+        if flow_df is not None and not flow_df.empty and "flow_signal" in flow_df.columns:
+            from src.data.stock_mapping import STOCK_NAME_MAP as _NAME_MAP
 
-        header = "| 代码 | 名称 | AI评分 | 动量排名 | 信号 | 资金流 | 摘要 |"
-        sep    = "|------|------|:------:|:--------:|:----:|:------:|------|"
+            def _bar(val, max_v, width=12):
+                if max_v == 0 or val == 0:
+                    return ""
+                return "█" * max(1, round(abs(val) / max_v * width))
+
+            in_rows  = flow_df[flow_df["flow_signal"].isin(["strong_in", "mild_in"])].copy()
+            out_rows = flow_df[flow_df["flow_signal"].isin(["strong_out", "mild_out"])].copy()
+
+            # 尝试提取净流入数值（从 label 解析）
+            def _parse_amount(label: str) -> float:
+                import re
+                m = re.search(r'([+-]?\d+\.?\d*)', label or "")
+                return float(m.group(1)) if m else 0.0
+
+            in_rows["amount"]  = in_rows["label"].apply(_parse_amount)
+            out_rows["amount"] = out_rows["label"].apply(lambda x: -abs(_parse_amount(x)))
+            in_rows  = in_rows.sort_values("amount",  ascending=False).head(6)
+            out_rows = out_rows.sort_values("amount").head(6)
+
+            lines += ["## 💰 今日资金动向", ""]
+
+            if not in_rows.empty:
+                max_in = in_rows["amount"].max() or 1
+                lines.append("**净流入（机构/国家队买入）**")
+                lines.append("```")
+                for _, row in in_rows.iterrows():
+                    name  = _NAME_MAP.get(row["code"], row["code"])
+                    amt   = row["amount"]
+                    prefix = "🏛️" if row.get("is_broad_base") else "🏦"
+                    bar   = _bar(amt, max_in)
+                    lines.append(f"{prefix} {name}({row['code']})  +{amt:.1f}亿  {bar}")
+                lines.append("```")
+                lines.append("")
+
+            if not out_rows.empty:
+                max_out = abs(out_rows["amount"].min()) or 1
+                lines.append("**净流出（注意风险）**")
+                lines.append("```")
+                for _, row in out_rows.iterrows():
+                    name = _NAME_MAP.get(row["code"], row["code"])
+                    amt  = abs(row["amount"])
+                    bar  = _bar(amt, max_out)
+                    lines.append(f"⚠️ {name}({row['code']})  -{amt:.1f}亿  {bar}")
+                lines.append("```")
+                lines.append("")
+
+            lines += ["---", ""]
+
+        # ── 全池速览（加共振星标）────────────────────────────────
+        header = "| 代码 | 名称 | AI评分 | 动量 | 共振 | 信号 | 摘要 |"
+        sep    = "|------|------|:------:|:----:|:----:|:----:|------|"
         lines += ["## 📊 全池速览", "", header, sep]
 
         for r in sorted_results:
@@ -354,15 +441,24 @@ class NotificationService(
             core = dash.get('core_conclusion', {}) or {}
             one  = (core.get('one_sentence') or r.analysis_summary or '—')[:38]
 
-            mo_info  = momentum_map.get(r.code, {})
-            _rank    = mo_info.get("rank") if mo_info else None
-            mo_rank  = f"#{int(_rank)}" if (_rank is not None and not (isinstance(_rank, float) and np.isnan(_rank))) else "—"
-            flow_lbl = flow_map.get(r.code, "")[:12] if flow_map else ""
+            mo_info = momentum_map.get(r.code, {})
+            _rank   = mo_info.get("rank") if mo_info else None
+            mo_rank = f"#{int(_rank)}" if (_rank is not None and not (isinstance(_rank, float) and np.isnan(_rank))) else "—"
 
-            lines.append(
-                f"| {r.code} | {name} | {r.sentiment_score} | {mo_rank} | {emoji} | {flow_lbl} | {one} |"
-            )
+            rv = resonance_map.get(r.code, 0)
+            resonance_str = ("⭐⭐⭐" if rv == 3 else "⭐⭐" if rv == 2 else "⭐" if rv == 1 else "")
+
+            lines.append(f"| {r.code} | {name} | {r.sentiment_score} | {mo_rank} | {resonance_str} | {emoji} | {one} |")
+
         lines += ["", "---", ""]
+
+        # ── 三重共振提示 ─────────────────────────────────────────
+        triple = [r for r in sorted_results if resonance_map.get(r.code, 0) == 3]
+        if triple:
+            names = "、".join(
+                f"{self._get_display_name(r, 'zh')}({r.code})" for r in triple
+            )
+            lines += [f"> ⭐⭐⭐ **三重共振**：{names}　AI+动量+资金流三信号同向，优先关注", ""]
 
         # ── 买入信号详情 ─────────────────────────────────────────
         if buy_results:
@@ -451,6 +547,47 @@ class NotificationService(
                 if catalysts or risks:
                     lines.append("")
 
+                lines += ["---", ""]
+
+        # ── 卖出/减仓提示 ────────────────────────────────────────
+        # 显示：①已持仓中出现卖出信号的  ②卖出信号中评分最高的（最多3只）
+        portfolio   = self._load_portfolio()
+        held_codes  = set(portfolio.get("positions", {}).keys())
+        held_sells  = [r for r in sell_results if r.code in held_codes]
+        other_sells = [r for r in sell_results if r.code not in held_codes][:3]
+        show_sells  = held_sells + [r for r in other_sells if r not in held_sells]
+
+        if show_sells:
+            lines += ["## ⚠️ 卖出/减仓提示", ""]
+            for r in show_sells:
+                name = self._get_display_name(r, 'zh')
+                dash = r.dashboard or {}
+                core = dash.get('core_conclusion', {}) or {}
+                dp   = dash.get('data_perspective', {}) or {}
+                bp   = dash.get('battle_plan', {}) or {}
+                trend = dp.get('trend_status', {}) or {}
+
+                held_mark = "🔴 **持仓！**" if r.code in held_codes else "🔴"
+                one = core.get('one_sentence') or r.analysis_summary or ''
+                ma  = trend.get('ma_alignment', '')
+                sl  = bp.get('stop_loss', '')
+
+                lines += [f"### {held_mark} {name} ({r.code}) · 评分 {r.sentiment_score}", ""]
+                if one:
+                    lines.append(f"> {one}")
+                    lines.append("")
+                detail = []
+                if ma:
+                    detail.append(f"均线：{ma}")
+                if sl:
+                    detail.append(f"止损参考：{sl}")
+                flow_lbl = flow_map.get(r.code, "")
+                if flow_lbl:
+                    detail.append(f"资金流：{flow_lbl}")
+                if detail:
+                    for d in detail:
+                        lines.append(f"- {d}")
+                    lines.append("")
                 lines += ["---", ""]
 
         lines.append(f"*{datetime.now().strftime('%H:%M')} 生成 · 仅供参考，不构成投资建议*")
@@ -992,11 +1129,13 @@ class NotificationService(
         momentum_map: dict = None,
         sentiment:    dict = None,
         flow_summary: str  = "",
+        result_map:   dict = None,
     ) -> List[str]:
         """生成ETF轮动操作指令模块，整合大盘择时、情绪数据、持仓管理和买入建议。"""
         total_capital = getattr(config, 'total_capital', 20000)
         momentum_map  = momentum_map or {}
         sentiment     = sentiment    or {}
+        result_map    = result_map   or {}
 
         # ── 大盘择时信号 ──────────────────────────────────────
         timing = {"final_position": 2, "summary": "", "error": "未运行",
@@ -1009,6 +1148,7 @@ class NotificationService(
             timing["error"] = str(e)
 
         final_pos  = timing.get("final_position", 2)   # 0=空仓 1=半仓 2=满仓
+        self._last_timing_final_pos = final_pos  # 供报告顶部市场定性使用
         rsrs_val   = timing.get("rsrs_signal")
         ali_state  = timing.get("alligator_state", "neutral")
         timing_err = timing.get("error")
@@ -1048,8 +1188,8 @@ class NotificationService(
         if positions:
             holding_lines += ["**📦 当前持仓**", ""]
             holding_lines += [
-                "| 代码 | 名称 | 持仓成本 | 现价 | 浮盈% | 硬止损线 | 状态 |",
-                "|------|------|---------|------|------|---------|------|",
+                "| 代码 | 名称 | 持仓成本 | 现价 | 浮盈% | 今日信号 | 止损线 | 状态 |",
+                "|------|------|---------|------|------|---------|--------|------|",
             ]
             for code, pos in positions.items():
                 name       = pos.get("name", code)
@@ -1091,9 +1231,19 @@ class NotificationService(
                 else:
                     status_flags.append("🟢正常")
 
+                # 今日AI信号
+                r_today = result_map.get(code)
+                if r_today:
+                    dt = getattr(r_today, 'decision_type', 'hold')
+                    sc = r_today.sentiment_score or 0
+                    sig_map = {"buy": "🟢继续持有/加仓", "sell": "🔴建议减仓", "hold": "🟡观望持有"}
+                    today_signal = f"{sig_map.get(dt, '🟡观望')}({sc}分)"
+                else:
+                    today_signal = "—"
+
                 status_str = " ".join(status_flags)
                 holding_lines.append(
-                    f"| {code} | {name} | {cost_price:.3f} | {price_str} | {pnl_str} | {stop_price} | {status_str} |"
+                    f"| {code} | {name} | {cost_price:.3f} | {price_str} | {pnl_str} | {today_signal} | {stop_price} | {status_str} |"
                 )
             holding_lines += [""]
 
