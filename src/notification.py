@@ -880,6 +880,17 @@ class NotificationService(
             self._get_report_language(result),
         )
     
+    def _load_portfolio(self) -> dict:
+        """读取 portfolio.json，返回持仓字典。失败时返回空持仓。"""
+        import json
+        from pathlib import Path
+        portfolio_path = Path(__file__).parent.parent / "portfolio.json"
+        try:
+            with open(portfolio_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"total_capital": 20000, "positions": {}}
+
     def _generate_rotation_directive(
         self,
         results: List[AnalysisResult],
@@ -907,30 +918,96 @@ class NotificationService(
                      "neutral": "🐊沉睡（震荡）"}.get(ali_state, ali_state)
         rsrs_str = f"{rsrs_val:.3f}" if rsrs_val is not None else "N/A"
 
-        # ── 个股ETF候选 ──────────────────────────────────────
+        # ── 读取持仓 ─────────────────────────────────────────
+        portfolio   = self._load_portfolio()
+        positions   = portfolio.get("positions", {})
+        # 用 results 建立 code -> AnalysisResult 快速查找
+        result_map  = {r.code: r for r in results}
+
+        # ── 持仓状态模块 ──────────────────────────────────────
+        holding_lines   = []
+        invested_capital = 0.0
+        stop_loss_alerts = []
+
+        if positions:
+            holding_lines += ["**📦 当前持仓**", ""]
+            holding_lines += [
+                "| 代码 | 名称 | 持仓成本 | 现价 | 浮盈% | 硬止损线 | 状态 |",
+                "|------|------|---------|------|------|---------|------|",
+            ]
+            for code, pos in positions.items():
+                name       = pos.get("name", code)
+                cost_price = float(pos.get("cost_price", 0))
+                shares     = float(pos.get("shares", 0))
+                cost_total = cost_price * shares
+                invested_capital += cost_total
+                stop_pct   = float(pos.get("stop_loss_pct", 0.05))
+                stop_price = round(cost_price * (1 - stop_pct), 4)
+
+                # 当日现价（来自分析结果）
+                r = result_map.get(code)
+                cur_price = getattr(r, "current_price", None) if r else None
+                if cur_price:
+                    pnl_pct  = (cur_price - cost_price) / cost_price * 100
+                    pnl_str  = f"{pnl_pct:+.1f}%"
+                    price_str = f"{cur_price:.3f}"
+                else:
+                    pnl_str   = "N/A"
+                    price_str = "N/A"
+                    pnl_pct   = 0.0
+
+                # 止损状态判断
+                ma20 = None
+                if r:
+                    dash = r.dashboard or {}
+                    dp   = dash.get("data_perspective", {}) or {}
+                    ma20 = dp.get("trend_status", {}).get("ma20") if dp else None
+
+                status_flags = []
+                if cur_price and cur_price <= stop_price:
+                    status_flags.append("🔴硬止损")
+                    stop_loss_alerts.append(f"{name}({code}) 已触发硬止损！现价{price_str} ≤ 止损线{stop_price}")
+                elif pnl_pct < -3:
+                    status_flags.append("🟠接近止损")
+                elif ma20 and cur_price and cur_price < ma20:
+                    status_flags.append("⚠️破MA20")
+                    stop_loss_alerts.append(f"{name}({code}) 价格跌破MA20({ma20:.3f})，注意均线止损")
+                else:
+                    status_flags.append("🟢正常")
+
+                status_str = " ".join(status_flags)
+                holding_lines.append(
+                    f"| {code} | {name} | {cost_price:.3f} | {price_str} | {pnl_str} | {stop_price} | {status_str} |"
+                )
+            holding_lines += [""]
+
+        # ── 可用资金 ─────────────────────────────────────────
+        available_cash = total_capital - invested_capital
+
+        # ── 个股ETF候选（排除已持仓，且可用资金充足）────────────
+        held_codes = set(positions.keys())
         buy_candidates = sorted(
-            [r for r in results if getattr(r, 'decision_type', '') == 'buy'],
+            [r for r in results
+             if getattr(r, 'decision_type', '') == 'buy'
+             and r.code not in held_codes],
             key=lambda x: x.sentiment_score,
             reverse=True,
         )[:3]
         etf_n = len(buy_candidates)
 
         # ── 综合仓位决策 ─────────────────────────────────────
-        # 大盘强制空仓时，ETF信号无效
         if final_pos == 0:
             position_label = "🔴 空仓"
             position_note  = timing.get("summary", "大盘择时空仓，ETF全部观望")
             effective_n    = 0
         elif final_pos == 1:
-            # 半仓：最多持1个ETF
             position_label = "🟡 半仓"
             position_note  = timing.get("summary", "大盘信号不一致，半仓谨慎操作")
             effective_n    = min(etf_n, 1)
         else:
-            # 满仓：最多持3个ETF
             if etf_n == 0:
                 position_label = "🟡 观望"
-                position_note  = "大盘看多，但今日无ETF买入信号，持仓观望"
+                position_note  = "大盘看多，但今日无新ETF买入信号，持仓观望"
             elif etf_n == 1:
                 position_label = "🟢 半仓"
                 position_note  = "大盘看多，仅1个ETF信号，建议半仓介入"
@@ -942,7 +1019,7 @@ class NotificationService(
         lines = [
             "## 🚀 今日操作指令",
             "",
-            f"**仓位状态：{position_label}**　　总资金：¥{total_capital:,}",
+            f"**仓位状态：{position_label}**　　总资金：¥{total_capital:,}　　可用资金：¥{available_cash:,.0f}",
             "",
             "**大盘择时指标**",
             f"- RSRS钝化值：`{rsrs_str}`（>0.7满仓｜<-0.7空仓）",
@@ -958,6 +1035,16 @@ class NotificationService(
 
         lines += [""]
 
+        # 止损警报（置顶）
+        if stop_loss_alerts:
+            lines += ["**🚨 止损警报**", ""]
+            for alert in stop_loss_alerts:
+                lines.append(f"> ⚠️ {alert}")
+            lines += [""]
+
+        # 持仓模块
+        lines += holding_lines
+
         if effective_n == 0:
             lines += [
                 f"> {position_note}",
@@ -967,24 +1054,28 @@ class NotificationService(
             ]
             return lines
 
-        # 计算各仓位金额
-        capital_to_use = total_capital if final_pos == 2 else total_capital // 2
-        selected = buy_candidates[:effective_n]
-        per_pos  = capital_to_use // effective_n
-        amounts  = [per_pos] * effective_n
+        # ── 新买入建议（按评分加权分配资金）────────────────────
+        # 权重：1个=100%，2个=55/45，3个=40/35/25
+        weight_map = {1: [1.0], 2: [0.55, 0.45], 3: [0.40, 0.35, 0.25]}
+        selected   = buy_candidates[:effective_n]
+        weights    = weight_map.get(effective_n, [1.0 / effective_n] * effective_n)
+        capital_to_use = min(available_cash, total_capital if final_pos == 2 else total_capital * 0.5)
+        amounts    = [int(capital_to_use * w // 100 * 100) for w in weights]  # 取整到百元
 
-        lines += ["**ETF买入建议**", ""]
-        lines += ["| 操作 | 代码 | 名称 | AI评分 | 建议金额 |",
-                  "|------|------|------|--------|---------|"]
+        lines += ["**💡 新仓买入建议**", ""]
+        lines += ["| 操作 | 代码 | 名称 | 评分 | 建议金额 | 参考份数 |",
+                  "|------|------|------|------|---------|---------|"]
 
         for r, amt in zip(selected, amounts):
             name  = getattr(r, 'name', '') or r.code
             score = r.sentiment_score
-            lines.append(f"| 🟢 买入 | {r.code} | {name} | {score}/100 | ¥{amt:,} |")
+            cur_p = getattr(r, 'current_price', None)
+            shares_hint = f"约{int(amt / cur_p / 100) * 100}份" if cur_p and cur_p > 0 else "—"
+            lines.append(f"| 🟢 买入 | {r.code} | {name} | {score}/100 | ¥{amt:,} | {shares_hint} |")
 
-        cash_left = total_capital - sum(amounts)
-        if cash_left > 0:
-            lines.append(f"| 💰 现金 | — | 观望 | — | ¥{cash_left:,} |")
+        cash_after = available_cash - sum(amounts)
+        if cash_after > 0:
+            lines.append(f"| 💰 现金 | — | 待机 | — | ¥{cash_after:,.0f} | — |")
 
         lines += [
             "",
