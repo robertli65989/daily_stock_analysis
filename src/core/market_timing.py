@@ -53,10 +53,10 @@ _SYMBOL = "000300"   # 沪深300 作为大盘代理
 
 # ─── 数据获取 ────────────────────────────────────────────────
 
-def _fetch_index_ohlc(symbol: str = _SYMBOL, lookback_days: int = 900) -> pd.DataFrame:
+def _fetch_index_ohlc(symbol: str = _SYMBOL, lookback_days: int = 1200) -> pd.DataFrame:
     """
     通过 AKShare 获取指数日线 OHLCV，返回 DataFrame（date 为索引）。
-    lookback_days 至少需要 RSRS_M + RSRS_N = 618，建议 900（留余量）。
+    lookback_days 至少需要 RSRS_M + RSRS_N = 618，设为 1200（约840交易日，余量充足）。
     """
     try:
         import akshare as ak
