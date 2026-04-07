@@ -32,54 +32,34 @@ logger = logging.getLogger(__name__)
 
 def _get_northbound_flow() -> Dict[str, Any]:
     """
-    获取北向资金（沪股通+深股通合计）净流入数据。
-    返回：today_net（亿元）、5d_net、streak（连续天数，正=流入，负=流出）
+    北向资金（沪深港通）净流入数据。
+    注意：中国监管自2024年8月起停止公开披露实时北向资金数据，
+    目前无可用的公开接口，返回空dict。
+    保留此函数以便未来数据恢复时复用。
     """
-    try:
-        import akshare as ak
-        # 沪深港通资金流向（东方财富）
-        df = ak.stock_em_hsgt_north_net_flow_in(indicator="北向资金")
-        if df is None or df.empty:
-            return {}
-        df = df.sort_values(df.columns[0]).tail(10).reset_index(drop=True)
-        # 列名：日期, 当日资金流入, 当日资金流入-沪股通, 当日资金流入-深股通
-        net_col = [c for c in df.columns if "当日" in str(c) and "沪" not in str(c) and "深" not in str(c)]
-        if not net_col:
-            net_col = df.columns[1:2].tolist()
-        series = pd.to_numeric(df[net_col[0]], errors="coerce") / 1e8  # 转亿元
-
-        today_net = round(float(series.iloc[-1]), 2)
-        net_5d    = round(float(series.tail(5).sum()), 2)
-
-        # 连续流入/流出天数
-        streak = 0
-        direction = 1 if series.iloc[-1] >= 0 else -1
-        for v in reversed(series.tolist()):
-            if (v >= 0 and direction == 1) or (v < 0 and direction == -1):
-                streak += direction
-            else:
-                break
-
-        return {"today_net": today_net, "net_5d": net_5d, "streak": streak}
-    except Exception as exc:
-        logger.warning(f"[情绪] 北向资金获取失败: {exc}")
-        return {}
+    return {}
 
 
 def _get_limit_stats() -> Dict[str, Any]:
     """
     获取今日A股涨停/跌停家数及情绪比值。
+    数据源：ak.stock_market_activity_legu（乐咕，实时，含涨跌停）
     比值 = 涨停数 / max(跌停数, 1)
     """
     try:
         import akshare as ak
-        today = datetime.now().strftime("%Y%m%d")
-        # 涨停池
-        zt = ak.stock_zt_pool_em(date=today)
-        zt_count = len(zt) if zt is not None else 0
-        # 跌停池
-        dt = ak.stock_dt_pool_em(date=today)
-        dt_count = len(dt) if dt is not None else 0
+        df = ak.stock_market_activity_legu()
+        if df is None or df.empty:
+            return {}
+
+        def _get_val(item_name):
+            rows = df[df["item"] == item_name]
+            if rows.empty:
+                return 0
+            return int(pd.to_numeric(rows["value"].iloc[0], errors="coerce") or 0)
+
+        zt_count = _get_val("涨停")
+        dt_count = _get_val("跌停")
 
         ratio = round(zt_count / max(dt_count, 1), 1)
         if ratio >= 5:
@@ -101,23 +81,22 @@ def _get_limit_stats() -> Dict[str, Any]:
 
 def _get_margin_balance() -> Dict[str, Any]:
     """
-    获取两融余额（全市场融资余额）最新值及5日变化。
+    获取两融余额（沪市融资融券余额）最新值及5日变化。
     余额增加 → 加杠杆（情绪偏多）；减少 → 去杠杆（情绪偏空）
+    数据源：ak.macro_china_market_margin_sh（上交所公布）
     """
     try:
         import akshare as ak
-        df = ak.stock_margin_account_info(
-            start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
-            end_date=datetime.now().strftime("%Y%m%d"),
-        )
+        df = ak.macro_china_market_margin_sh()
         if df is None or df.empty:
             return {}
-        # 找余额列（通常是"融资余额"）
-        balance_col = [c for c in df.columns if "融资余额" in str(c) and "融券" not in str(c)]
-        if not balance_col:
-            balance_col = df.columns[1:2].tolist()
-        df = df.sort_values(df.columns[0]).tail(10).reset_index(drop=True)
-        series = pd.to_numeric(df[balance_col[0]], errors="coerce") / 1e8  # 亿元
+        # 列：日期, 融资买入额, 融资余额, 融券卖出量, 融券余量, 融券余额, 融资融券余额
+        df["日期"] = pd.to_datetime(df["日期"])
+        df = df.sort_values("日期").tail(10).reset_index(drop=True)
+
+        # 用"融资融券余额"（元），转亿元
+        bal_col = "融资融券余额" if "融资融券余额" in df.columns else df.columns[-1]
+        series  = pd.to_numeric(df[bal_col], errors="coerce") / 1e8
 
         latest   = round(float(series.iloc[-1]), 0)
         change5d = round(float(series.iloc[-1] - series.iloc[-min(5, len(series))]), 0)
