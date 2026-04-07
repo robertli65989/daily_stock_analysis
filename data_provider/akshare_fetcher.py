@@ -546,11 +546,11 @@ class AkshareFetcher(BaseFetcher):
         logger.info(f"[API调用] ak.fund_etf_hist_em(symbol={stock_code}, period=daily, "
                    f"start_date={start_date.replace('-', '')}, end_date={end_date.replace('-', '')}, adjust=qfq)")
         
+        import time as _time
+
+        # 主力：东财接口
         try:
-            import time as _time
             api_start = _time.time()
-            
-            # 调用 akshare 获取 ETF 日线数据
             df = ak.fund_etf_hist_em(
                 symbol=stock_code,
                 period="daily",
@@ -558,29 +558,46 @@ class AkshareFetcher(BaseFetcher):
                 end_date=end_date.replace('-', ''),
                 adjust="qfq"  # 前复权
             )
-            
             api_elapsed = _time.time() - api_start
-            
-            # 记录返回数据摘要
             if df is not None and not df.empty:
                 logger.info(f"[API返回] ak.fund_etf_hist_em 成功: 返回 {len(df)} 行数据, 耗时 {api_elapsed:.2f}s")
                 logger.info(f"[API返回] 列名: {list(df.columns)}")
                 logger.info(f"[API返回] 日期范围: {df['日期'].iloc[0]} ~ {df['日期'].iloc[-1]}")
-                logger.debug(f"[API返回] 最新3条数据:\n{df.tail(3).to_string()}")
+                return df
             else:
-                logger.warning(f"[API返回] ak.fund_etf_hist_em 返回空数据, 耗时 {api_elapsed:.2f}s")
-            
-            return df
-            
+                logger.warning(f"[API返回] ak.fund_etf_hist_em 返回空数据，切换新浪备用接口")
         except Exception as e:
             error_msg = str(e).lower()
-            
-            # 检测反爬封禁
             if any(keyword in error_msg for keyword in ['banned', 'blocked', '频率', 'rate', '限制']):
-                logger.warning(f"检测到可能被封禁: {e}")
-                raise RateLimitError(f"Akshare 可能被限流: {e}") from e
-            
-            raise DataFetchError(f"Akshare 获取 ETF 数据失败: {e}") from e
+                logger.warning(f"检测到可能被封禁，切换新浪备用: {e}")
+            else:
+                logger.warning(f"ak.fund_etf_hist_em 失败，切换新浪备用接口: {e}")
+
+        # 备用：新浪接口（fund_etf_hist_sina，不复权）
+        try:
+            import pandas as pd
+            api_start = _time.time()
+            df_sina = ak.fund_etf_hist_sina(symbol=stock_code)
+            api_elapsed = _time.time() - api_start
+            if df_sina is not None and not df_sina.empty:
+                # 转换列名为与 fund_etf_hist_em 兼容的格式
+                df_sina = df_sina.rename(columns={
+                    "date": "日期", "open": "开盘", "high": "最高",
+                    "low": "最低", "close": "收盘", "volume": "成交量",
+                })
+                # 按日期过滤
+                df_sina["日期"] = pd.to_datetime(df_sina["日期"]).dt.strftime("%Y-%m-%d")
+                df_sina = df_sina[
+                    (df_sina["日期"] >= start_date) & (df_sina["日期"] <= end_date)
+                ].reset_index(drop=True)
+                if not df_sina.empty:
+                    logger.info(f"[API返回] ak.fund_etf_hist_sina 成功: 返回 {len(df_sina)} 行数据, 耗时 {api_elapsed:.2f}s")
+                    return df_sina
+            logger.warning(f"[API返回] ak.fund_etf_hist_sina 返回空数据")
+        except Exception as e2:
+            logger.warning(f"ak.fund_etf_hist_sina 也失败: {e2}")
+
+        raise DataFetchError(f"Akshare 获取 ETF {stock_code} 数据失败（东财+新浪均失败）")
     
     def _fetch_us_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """

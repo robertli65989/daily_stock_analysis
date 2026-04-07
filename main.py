@@ -534,8 +534,21 @@ def run_full_analysis(
                     else:
                         logger.warning("合并推送失败")
         elif not merge_notification and is_etf_rotation and not results and not args.no_notify:
-            # 非合并模式下ETF分析失败保底
-            logger.warning("ETF个股分析全部失败（非合并模式），跳过推送")
+            # 非合并模式下ETF分析失败保底：生成并发送基础报告
+            try:
+                fallback_content = pipeline.notifier.generate_aggregate_report(
+                    [],
+                    report_type_str,
+                )
+                if fallback_content.strip() and pipeline.notifier.is_available():
+                    if pipeline.notifier.send(fallback_content, email_send_to_all=True):
+                        logger.warning("ETF个股分析全部失败，已发送仅含大盘择时的基础报告")
+                    else:
+                        logger.warning("ETF基础报告发送失败")
+                else:
+                    logger.warning("ETF个股分析全部失败，基础报告内容为空或推送未配置")
+            except Exception as fb_exc:
+                logger.warning(f"ETF基础报告生成失败: {fb_exc}")
 
         # 输出摘要
         if results:

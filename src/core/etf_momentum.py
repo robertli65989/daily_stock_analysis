@@ -37,13 +37,16 @@ _BENCHMARK        = "000300"
 def _fetch_close(code: str, calendar_days: int = _CALENDAR_BUFFER) -> Optional[pd.Series]:
     """
     获取单只ETF前复权收盘价序列。
-    使用 stock_zh_a_hist（A股/ETF通用接口）。
+    主力：stock_zh_a_hist（东财，前复权）
+    备用：fund_etf_hist_sina（新浪，不复权）
     失败返回 None，不抛出异常。
     """
+    import akshare as ak
+    end_date   = datetime.now()
+    start_date = end_date - timedelta(days=calendar_days)
+
+    # 主力：东财接口
     try:
-        import akshare as ak
-        end_date   = datetime.now()
-        start_date = end_date - timedelta(days=calendar_days)
         df = ak.stock_zh_a_hist(
             symbol     = code,
             period     = "daily",
@@ -51,14 +54,26 @@ def _fetch_close(code: str, calendar_days: int = _CALENDAR_BUFFER) -> Optional[p
             end_date   = end_date.strftime("%Y%m%d"),
             adjust     = "qfq",
         )
-        if df is None or df.empty:
-            return None
-        df = df.rename(columns={"日期": "date", "收盘": "close"})
-        df["date"] = pd.to_datetime(df["date"])
-        return df.set_index("date").sort_index()["close"]
+        if df is not None and not df.empty:
+            df = df.rename(columns={"日期": "date", "收盘": "close"})
+            df["date"] = pd.to_datetime(df["date"])
+            return df.set_index("date").sort_index()["close"]
     except Exception as exc:
-        logger.debug(f"[动量] ETF {code} 数据获取失败: {exc}")
-        return None
+        logger.debug(f"[动量] ETF {code} 东财接口失败，切换新浪: {exc}")
+
+    # 备用：新浪接口
+    try:
+        df = ak.fund_etf_hist_sina(symbol=code)
+        if df is not None and not df.empty:
+            df = df.rename(columns={"date": "date", "close": "close"})
+            df["date"] = pd.to_datetime(df["date"])
+            series = df.set_index("date").sort_index()["close"]
+            # 按日期裁剪
+            return series[series.index >= pd.Timestamp(start_date)]
+    except Exception as exc2:
+        logger.debug(f"[动量] ETF {code} 新浪接口也失败: {exc2}")
+
+    return None
 
 
 def _fetch_benchmark_close(calendar_days: int = _CALENDAR_BUFFER) -> Optional[pd.Series]:
