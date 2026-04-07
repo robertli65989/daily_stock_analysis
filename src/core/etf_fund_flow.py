@@ -191,18 +191,25 @@ def get_etf_fund_flow(codes: List[str]) -> pd.DataFrame:
 
 
 def summarize_fund_flow(flow_df: pd.DataFrame) -> str:
-    """生成资金流向一句话摘要，用于报告顶部。"""
+    """生成资金流向一句话摘要，用于报告顶部（显示代码+名称）。"""
     if flow_df.empty:
         return ""
+    from src.data.stock_mapping import STOCK_NAME_MAP
+
+    def _fmt(row) -> str:
+        code = row["code"]
+        name = STOCK_NAME_MAP.get(code, code)
+        return f"{name}({code})"
+
     strong_in  = flow_df[flow_df["flow_signal"] == "strong_in"]
     strong_out = flow_df[flow_df["flow_signal"] == "strong_out"]
     parts = []
     if not strong_in.empty:
-        names = "、".join(strong_in["code"].tolist())
-        broad = strong_in[strong_in["is_broad_base"]]
+        items  = "、".join(strong_in.apply(_fmt, axis=1).tolist())
+        broad  = strong_in[strong_in["is_broad_base"]]
         prefix = "🏛️国家队信号" if not broad.empty else "🏦机构大幅流入"
-        parts.append(f"{prefix}：{names}")
+        parts.append(f"{prefix}：{items}")
     if not strong_out.empty:
-        names = "、".join(strong_out["code"].tolist())
-        parts.append(f"⚠️资金大幅流出：{names}")
+        items = "、".join(strong_out.apply(_fmt, axis=1).tolist())
+        parts.append(f"⚠️资金大幅流出：{items}")
     return "　｜　".join(parts)

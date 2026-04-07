@@ -373,12 +373,33 @@ class NotificationService(
                 intel = dash.get('intelligence', {}) or {}
                 bp    = dash.get('battle_plan', {}) or {}
 
-                lines += [f"### {emoji} {name} ({r.code}) · 评分 {r.sentiment_score}", ""]
+                mo   = momentum_map.get(r.code, {})
+                flow = flow_map.get(r.code, "")
+
+                lines += [f"### {emoji} {name} ({r.code}) · AI评分 {r.sentiment_score}", ""]
 
                 # 一句话结论
                 one = core.get('one_sentence') or r.analysis_summary or ''
                 if one:
                     lines += [f"> {one}", ""]
+
+                # 量化指标摘要（动量 + 资金流）
+                quant_lines = []
+                if mo:
+                    n_total = len(results)
+                    ret20_s = f"{mo['ret20']:+.1f}%" if mo.get('ret20') is not None else "N/A"
+                    ret60_s = f"{mo['ret60']:+.1f}%" if mo.get('ret60') is not None else "N/A"
+                    rel_s   = f"{mo['rel']:+.1f}%" if mo.get('rel') is not None else "N/A"
+                    quant_lines.append(
+                        f"动量排名：**#{mo['rank']}/{n_total}**（20日{ret20_s}｜60日{ret60_s}｜超额{rel_s}）"
+                    )
+                if flow:
+                    quant_lines.append(f"资金流向：**{flow}**")
+                if quant_lines:
+                    lines += ["**📈 量化指标**", ""]
+                    for ql in quant_lines:
+                        lines.append(f"- {ql}")
+                    lines.append("")
 
                 # 空仓/持仓分类建议
                 pos = core.get('position_advice', {}) or {}
@@ -988,7 +1009,24 @@ class NotificationService(
 
         ali_emoji = {"bull": "🐊饥饿（多头）", "bear": "🐊吃饱（空头）",
                      "neutral": "🐊沉睡（震荡）"}.get(ali_state, ali_state)
-        rsrs_str = f"{rsrs_val:.3f}" if rsrs_val is not None else "N/A"
+        if rsrs_val is None:
+            rsrs_str  = "N/A"
+            rsrs_desc = "数据不足"
+        elif rsrs_val >= 0.7:
+            rsrs_str  = f"{rsrs_val:.3f}"
+            rsrs_desc = "强势区间，满仓信号"
+        elif rsrs_val >= 0.3:
+            rsrs_str  = f"{rsrs_val:.3f}"
+            rsrs_desc = "温和看多，需鳄鱼线确认"
+        elif rsrs_val >= 0:
+            rsrs_str  = f"{rsrs_val:.3f}"
+            rsrs_desc = "弱多，偏谨慎"
+        elif rsrs_val >= -0.7:
+            rsrs_str  = f"{rsrs_val:.3f}"
+            rsrs_desc = "中性偏弱，观望"
+        else:
+            rsrs_str  = f"{rsrs_val:.3f}"
+            rsrs_desc = "空头区间，空仓信号"
 
         # ── 读取持仓 ─────────────────────────────────────────
         portfolio   = self._load_portfolio()
@@ -1111,7 +1149,7 @@ class NotificationService(
             f"**仓位状态：{position_label}**　　总资金：¥{total_capital:,}　　可用资金：¥{available_cash:,.0f}",
             "",
             "**大盘择时指标**",
-            f"- RSRS钝化值：`{rsrs_str}`（>0.7满仓｜<-0.7空仓）",
+            f"- RSRS钝化值：`{rsrs_str}` → {rsrs_desc}",
             f"- 鳄鱼线状态：{ali_emoji}",
         ]
 

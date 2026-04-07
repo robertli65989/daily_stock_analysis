@@ -441,10 +441,27 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
                 sector_block = "## Sector Performance\n(US sector data not available.)"
         else:
             if self.profile.has_market_stats:
+                # 获取北向资金 + 两融数据补充进市场概况
+                north_line  = ""
+                margin_line = ""
+                try:
+                    from src.core.market_sentiment import _get_northbound_flow, _get_margin_balance
+                    nb = _get_northbound_flow()
+                    if nb:
+                        net   = nb.get("today_net", 0)
+                        net5d = nb.get("net_5d", 0)
+                        streak = nb.get("streak", 0)
+                        streak_str = f"，连续{abs(streak)}日{'流入' if streak > 0 else '流出'}" if abs(streak) >= 2 else ""
+                        north_line = f"\n- 北向资金：今日净流入 {'+' if net >= 0 else ''}{net:.1f}亿（5日累计{'+' if net5d >= 0 else ''}{net5d:.1f}亿{streak_str}）"
+                    mg = _get_margin_balance()
+                    if mg:
+                        margin_line = f"\n- 两融余额：{mg.get('balance', 0):.0f}亿（5日变化{'+' if mg.get('change5d',0) >= 0 else ''}{mg.get('change5d',0):.0f}亿，{mg.get('trend','')}）"
+                except Exception:
+                    pass
                 stats_block = f"""## 市场概况
 - 上涨: {overview.up_count} 家 | 下跌: {overview.down_count} 家 | 平盘: {overview.flat_count} 家
 - 涨停: {overview.limit_up_count} 家 | 跌停: {overview.limit_down_count} 家
-- 两市成交额: {overview.total_amount:.0f} 亿元"""
+- 两市成交额: {overview.total_amount:.0f} 亿元{north_line}{margin_line}"""
             else:
                 stats_block = "## 市场概况\n（美股暂无涨跌家数等统计）"
 
@@ -574,7 +591,7 @@ Output the report content directly, no extra commentary.
 （{self.profile.prompt_index_hint}）
 
 ### 三、资金动向
-（解读成交额流向的含义）
+（必须引用上方【市场概况】中的北向资金净流入数值和两融余额变化，结合成交额解读当日资金行为，不得编造数字）
 
 ### 四、热点解读
 （分析领涨领跌板块背后的逻辑和驱动因素）
