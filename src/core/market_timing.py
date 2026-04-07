@@ -66,12 +66,23 @@ def _fetch_index_ohlc(symbol: str = _SYMBOL, lookback_days: int = 900) -> pd.Dat
     end_date   = datetime.now()
     start_date = end_date - timedelta(days=lookback_days)
 
-    df = ak.index_zh_a_hist(
-        symbol     = symbol,
-        period     = "daily",
-        start_date = start_date.strftime("%Y%m%d"),
-        end_date   = end_date.strftime("%Y%m%d"),
-    )
+    import time as _time
+    last_exc = None
+    for attempt in range(3):
+        try:
+            df = ak.index_zh_a_hist(
+                symbol     = symbol,
+                period     = "daily",
+                start_date = start_date.strftime("%Y%m%d"),
+                end_date   = end_date.strftime("%Y%m%d"),
+            )
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                _time.sleep(3)
+    else:
+        raise last_exc
 
     rename_map = {"日期": "date", "开盘": "open", "收盘": "close",
                   "最高": "high", "最低": "low", "成交量": "volume"}

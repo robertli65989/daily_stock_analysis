@@ -246,7 +246,121 @@ class NotificationService(
         normalized_type = self._normalize_report_type(report_type)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
+        if normalized_type == ReportType.ETF_ROTATION:
+            return self.generate_etf_rotation_report(results, report_date=report_date)
         return self.generate_dashboard_report(results, report_date=report_date)
+
+    def generate_etf_rotation_report(
+        self,
+        results: List[AnalysisResult],
+        report_date: Optional[str] = None,
+    ) -> str:
+        """
+        ETF轮动专用报告：操作指令 + 全池速览表 + 买入信号详情。
+        长度适中，适合Server酱推送，兼顾可读性和完整性。
+        """
+        if report_date is None:
+            report_date = datetime.now().strftime('%Y-%m-%d')
+        config = get_config()
+
+        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        buy_results  = [r for r in sorted_results if getattr(r, 'decision_type', '') == 'buy']
+        hold_results = [r for r in sorted_results if getattr(r, 'decision_type', '') in ('hold', '')]
+        sell_results = [r for r in sorted_results if getattr(r, 'decision_type', '') == 'sell']
+
+        lines = [
+            f"# 🎯 {report_date} ETF轮动日报",
+            "",
+            f"> 共 **{len(results)}** 只 | 🟢买入:{len(buy_results)}  🟡持有:{len(hold_results)}  🔴卖出:{len(sell_results)}",
+            "",
+        ]
+
+        # ── 操作指令（含仓位金额）────────────────────────────────
+        lines.extend(self._generate_rotation_directive(results, config))
+
+        # ── 全池速览表 ───────────────────────────────────────────
+        lines += [
+            "## 📊 全池速览",
+            "",
+            "| 代码 | 名称 | 评分 | 信号 | 摘要 |",
+            "|------|------|:----:|:----:|------|",
+        ]
+        for r in sorted_results:
+            _, emoji, _ = self._get_signal_level(r)
+            name = self._get_display_name(r, 'zh')
+            dash = r.dashboard or {}
+            core = dash.get('core_conclusion', {}) or {}
+            one = (core.get('one_sentence') or r.analysis_summary or '—')[:40]
+            lines.append(f"| {r.code} | {name} | {r.sentiment_score} | {emoji} | {one} |")
+        lines += ["", "---", ""]
+
+        # ── 买入信号详情 ─────────────────────────────────────────
+        if buy_results:
+            lines += ["## 🔍 买入信号详情", ""]
+            for r in buy_results:
+                _, emoji, _ = self._get_signal_level(r)
+                name = self._get_display_name(r, 'zh')
+                dash = r.dashboard or {}
+                core  = dash.get('core_conclusion', {}) or {}
+                dp    = dash.get('data_perspective', {}) or {}
+                intel = dash.get('intelligence', {}) or {}
+                bp    = dash.get('battle_plan', {}) or {}
+
+                lines += [f"### {emoji} {name} ({r.code}) · 评分 {r.sentiment_score}", ""]
+
+                # 一句话结论
+                one = core.get('one_sentence') or r.analysis_summary or ''
+                if one:
+                    lines += [f"> {one}", ""]
+
+                # 空仓/持仓分类建议
+                pos = core.get('position_advice', {}) or {}
+                no_pos = pos.get('no_position', '')
+                has_pos = pos.get('has_position', '')
+                if no_pos or has_pos:
+                    lines += ["**操作建议**", ""]
+                    if no_pos:
+                        lines.append(f"- 🆕 空仓者：{no_pos}")
+                    if has_pos:
+                        lines.append(f"- 💼 持仓者：{has_pos}")
+                    lines.append("")
+
+                # 技术面
+                trend = dp.get('trend_status', {}) or {}
+                price = dp.get('price_position', {}) or {}
+                vol   = dp.get('volume_analysis', {}) or {}
+                tech_lines = []
+                if trend.get('ma_alignment'):
+                    bull_mark = "✅" if trend.get('is_bullish') else "❌"
+                    tech_lines.append(f"均线：{trend['ma_alignment']} {bull_mark}")
+                if price.get('deviation_rate') is not None:
+                    dev = price['deviation_rate']
+                    dev_str = f"+{dev:.1f}%" if dev >= 0 else f"{dev:.1f}%"
+                    tech_lines.append(f"乖离率：{dev_str}")
+                if vol.get('volume_trend'):
+                    tech_lines.append(f"量能：{vol['volume_trend']}")
+                if bp.get('stop_loss'):
+                    tech_lines.append(f"止损参考：{bp['stop_loss']}")
+                if tech_lines:
+                    lines += ["**技术面**", ""]
+                    for tl in tech_lines:
+                        lines.append(f"- {tl}")
+                    lines.append("")
+
+                # 消息面（仅显示最关键的）
+                catalysts = intel.get('positive_catalysts', []) or []
+                risks     = intel.get('risk_alerts', []) or []
+                if catalysts:
+                    lines.append(f"**利好**：{catalysts[0]}")
+                if risks:
+                    lines.append(f"**风险**：{risks[0]}")
+                if catalysts or risks:
+                    lines.append("")
+
+                lines += ["---", ""]
+
+        lines.append(f"*{datetime.now().strftime('%H:%M')} 生成 · 仅供参考，不构成投资建议*")
+        return "\n".join(lines)
 
     def _collect_models_used(self, results: List[AnalysisResult]) -> List[str]:
         models: List[str] = []

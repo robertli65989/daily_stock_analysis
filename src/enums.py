@@ -17,18 +17,19 @@ class ReportType(str, Enum):
     用于 API 触发分析时选择推送的报告格式。
     继承 str 使其可以直接与字符串比较和序列化。
     """
-    SIMPLE = "simple"  # 精简报告：使用 generate_single_stock_report
-    FULL = "full"      # 完整报告：使用 generate_dashboard_report
-    BRIEF = "brief"    # 简洁模式：3-5 句话概括，适合移动端/推送
+    SIMPLE = "simple"       # 精简报告：使用 generate_single_stock_report
+    FULL = "full"           # 完整报告：使用 generate_dashboard_report
+    BRIEF = "brief"         # 简洁模式：3-5 句话概括，适合移动端/推送
+    ETF_ROTATION = "etf_rotation"  # ETF轮动模式：操作指令+全池速览+买入详情
 
     @classmethod
     def from_str(cls, value: str) -> "ReportType":
         """
         从字符串安全地转换为枚举值
-        
+
         Args:
             value: 字符串值
-            
+
         Returns:
             对应的枚举值，无效输入返回默认值 SIMPLE
         """
@@ -39,7 +40,7 @@ class ReportType(str, Enum):
             return cls(normalized)
         except (ValueError, AttributeError):
             return cls.SIMPLE
-    
+
     @property
     def display_name(self) -> str:
         """获取用于显示的名称"""
@@ -47,4 +48,5 @@ class ReportType(str, Enum):
             ReportType.SIMPLE: "精简报告",
             ReportType.FULL: "完整报告",
             ReportType.BRIEF: "简洁报告",
+            ReportType.ETF_ROTATION: "ETF轮动报告",
         }.get(self, "精简报告")
