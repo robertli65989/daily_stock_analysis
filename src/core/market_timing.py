@@ -67,29 +67,48 @@ def _fetch_index_ohlc(symbol: str = _SYMBOL, lookback_days: int = 900) -> pd.Dat
     start_date = end_date - timedelta(days=lookback_days)
 
     import time as _time
+
+    # ── 主数据源：index_zh_a_hist（东方财富，3次重试）──
+    df = None
     last_exc = None
     for attempt in range(3):
         try:
-            df = ak.index_zh_a_hist(
+            raw = ak.index_zh_a_hist(
                 symbol     = symbol,
                 period     = "daily",
                 start_date = start_date.strftime("%Y%m%d"),
                 end_date   = end_date.strftime("%Y%m%d"),
             )
+            rename_map = {"日期": "date", "开盘": "open", "收盘": "close",
+                          "最高": "high", "最低": "low", "成交量": "volume"}
+            raw = raw.rename(columns=rename_map)
+            raw["date"] = pd.to_datetime(raw["date"])
+            raw = raw.set_index("date").sort_index()
+            df = raw[["open", "high", "low", "close", "volume"]]
             break
         except Exception as exc:
             last_exc = exc
+            logger.warning(f"index_zh_a_hist 第{attempt+1}次失败: {exc}")
             if attempt < 2:
                 _time.sleep(3)
-    else:
-        raise last_exc
 
-    rename_map = {"日期": "date", "开盘": "open", "收盘": "close",
-                  "最高": "high", "最低": "low", "成交量": "volume"}
-    df = df.rename(columns=rename_map)
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.set_index("date").sort_index()
-    return df[["open", "high", "low", "close", "volume"]]
+    # ── 备用数据源：stock_zh_index_daily（新浪，列名不同）──
+    if df is None:
+        logger.warning(f"主数据源全部失败，切换备用数据源 stock_zh_index_daily: {last_exc}")
+        try:
+            # 新浪接口：symbol 需加交易所前缀，如 sh000300
+            sina_symbol = f"sh{symbol}" if not symbol.startswith(("sh", "sz")) else symbol
+            raw2 = ak.stock_zh_index_daily(symbol=sina_symbol)
+            # 新浪返回列：date, open, high, low, close, volume
+            raw2["date"] = pd.to_datetime(raw2["date"])
+            raw2 = raw2.set_index("date").sort_index()
+            raw2 = raw2[raw2.index >= pd.Timestamp(start_date)]
+            df = raw2[["open", "high", "low", "close", "volume"]]
+        except Exception as exc2:
+            logger.error(f"备用数据源也失败: {exc2}")
+            raise last_exc  # 抛出原始错误以保留上下文
+
+    return df
 
 
 # ─── RSRS 计算 ───────────────────────────────────────────────
