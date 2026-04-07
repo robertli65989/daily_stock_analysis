@@ -501,6 +501,9 @@ def run_full_analysis(
                 market_report = review_result
 
         # Issue #190: 合并推送（个股+大盘复盘）
+        report_type_str = getattr(config, 'report_type', 'simple')
+        is_etf_rotation = (str(report_type_str).lower() == 'etf_rotation')
+
         if merge_notification and (results or market_report) and not args.no_notify:
             parts = []
             if market_report:
@@ -508,9 +511,21 @@ def run_full_analysis(
             if results:
                 dashboard_content = pipeline.notifier.generate_aggregate_report(
                     results,
-                    getattr(config, 'report_type', 'simple'),
+                    report_type_str,
                 )
                 parts.append(f"# 🚀 个股决策仪表盘\n\n{dashboard_content}")
+            elif is_etf_rotation:
+                # ETF轮动模式：即使个股分析全部失败，仍生成基础报告（大盘择时+动量）
+                try:
+                    fallback_content = pipeline.notifier.generate_aggregate_report(
+                        [],
+                        report_type_str,
+                    )
+                    if fallback_content.strip():
+                        parts.append(f"# 📊 ETF轮动报告\n\n{fallback_content}")
+                        logger.warning("ETF个股分析全部失败，已发送仅含大盘择时的基础报告")
+                except Exception as fb_exc:
+                    logger.warning(f"ETF基础报告生成失败: {fb_exc}")
             if parts:
                 combined_content = "\n\n---\n\n".join(parts)
                 if pipeline.notifier.is_available():
@@ -518,6 +533,9 @@ def run_full_analysis(
                         logger.info("已合并推送（个股+大盘复盘）")
                     else:
                         logger.warning("合并推送失败")
+        elif not merge_notification and is_etf_rotation and not results and not args.no_notify:
+            # 非合并模式下ETF分析失败保底
+            logger.warning("ETF个股分析全部失败（非合并模式），跳过推送")
 
         # 输出摘要
         if results:
