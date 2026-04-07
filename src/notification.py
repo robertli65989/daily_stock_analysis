@@ -263,7 +263,60 @@ class NotificationService(
             report_date = datetime.now().strftime('%Y-%m-%d')
         config = get_config()
 
-        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        codes = [r.code for r in results]
+
+        # ── 动量因子（并发拉取，失败不影响主流程）──────────────────
+        momentum_df = None
+        try:
+            from src.core.etf_momentum import get_etf_momentum
+            momentum_df = get_etf_momentum(codes)
+            logger.info(f"[动量] 计算完成，TOP3: {momentum_df.head(3)['code'].tolist()}")
+        except Exception as exc:
+            logger.warning(f"[动量] 计算失败，跳过: {exc}")
+
+        # 建立 code -> 动量信息 查找表
+        momentum_map: dict = {}
+        if momentum_df is not None and not momentum_df.empty:
+            for _, row in momentum_df.iterrows():
+                momentum_map[row["code"]] = {
+                    "rank":  int(row["rank"]),
+                    "ret20": row["ret20"],
+                    "ret60": row["ret60"],
+                    "rel":   row["rel_str"],
+                    "score": row["momentum_score"],
+                }
+
+        # ── 市场情绪（北向资金 + 涨停跌停）────────────────────────
+        sentiment = {}
+        try:
+            from src.core.market_sentiment import get_market_sentiment
+            sentiment = get_market_sentiment()
+            logger.info(f"[情绪] {sentiment.get('summary', '')}")
+        except Exception as exc:
+            logger.warning(f"[情绪] 获取失败，跳过: {exc}")
+
+        # ── ETF资金流向（国家队/聪明钱信号）───────────────────────
+        flow_df = None
+        flow_map: dict = {}
+        try:
+            from src.core.etf_fund_flow import get_etf_fund_flow, summarize_fund_flow
+            flow_df  = get_etf_fund_flow(codes)
+            flow_summary = summarize_fund_flow(flow_df)
+            if not flow_df.empty:
+                for _, row in flow_df.iterrows():
+                    flow_map[row["code"]] = row.get("label", "")
+            logger.info(f"[资金流] {flow_summary}")
+        except Exception as exc:
+            logger.warning(f"[资金流] 获取失败，跳过: {exc}")
+            flow_summary = ""
+
+        # ── 综合排序：AI评分 × 0.5 + 动量评分 × 0.5 ───────────────
+        def combined_score(r: "AnalysisResult") -> float:
+            ai  = r.sentiment_score or 0
+            mo  = momentum_map.get(r.code, {}).get("score", 50)
+            return ai * 0.5 + mo * 0.5
+
+        sorted_results = sorted(results, key=combined_score, reverse=True)
         buy_results  = [r for r in sorted_results if getattr(r, 'decision_type', '') == 'buy']
         hold_results = [r for r in sorted_results if getattr(r, 'decision_type', '') in ('hold', '')]
         sell_results = [r for r in sorted_results if getattr(r, 'decision_type', '') == 'sell']
@@ -276,22 +329,36 @@ class NotificationService(
         ]
 
         # ── 操作指令（含仓位金额）────────────────────────────────
-        lines.extend(self._generate_rotation_directive(results, config))
+        lines.extend(self._generate_rotation_directive(
+            results, config,
+            momentum_map=momentum_map,
+            sentiment=sentiment,
+            flow_summary=getattr(self, '_flow_summary_cache', flow_summary),
+        ))
+        self._flow_summary_cache = flow_summary  # 暂存供 directive 使用
 
-        # ── 全池速览表 ───────────────────────────────────────────
-        lines += [
-            "## 📊 全池速览",
-            "",
-            "| 代码 | 名称 | 评分 | 信号 | 摘要 |",
-            "|------|------|:----:|:----:|------|",
-        ]
+        # ── 全池速览表（加入动量排名和资金流列）──────────────────
+        has_momentum = bool(momentum_map)
+        has_flow     = bool(flow_map)
+
+        header = "| 代码 | 名称 | AI评分 | 动量排名 | 信号 | 资金流 | 摘要 |"
+        sep    = "|------|------|:------:|:--------:|:----:|:------:|------|"
+        lines += ["## 📊 全池速览", "", header, sep]
+
         for r in sorted_results:
             _, emoji, _ = self._get_signal_level(r)
             name = self._get_display_name(r, 'zh')
             dash = r.dashboard or {}
             core = dash.get('core_conclusion', {}) or {}
-            one = (core.get('one_sentence') or r.analysis_summary or '—')[:40]
-            lines.append(f"| {r.code} | {name} | {r.sentiment_score} | {emoji} | {one} |")
+            one  = (core.get('one_sentence') or r.analysis_summary or '—')[:38]
+
+            mo_info  = momentum_map.get(r.code, {})
+            mo_rank  = f"#{mo_info['rank']}" if mo_info else "—"
+            flow_lbl = flow_map.get(r.code, "")[:12] if flow_map else ""
+
+            lines.append(
+                f"| {r.code} | {name} | {r.sentiment_score} | {mo_rank} | {emoji} | {flow_lbl} | {one} |"
+            )
         lines += ["", "---", ""]
 
         # ── 买入信号详情 ─────────────────────────────────────────
@@ -895,9 +962,14 @@ class NotificationService(
         self,
         results: List[AnalysisResult],
         config,
+        momentum_map: dict = None,
+        sentiment:    dict = None,
+        flow_summary: str  = "",
     ) -> List[str]:
-        """生成ETF轮动操作指令模块，整合大盘择时（RSRS+鳄鱼线）和个股买入建议。"""
+        """生成ETF轮动操作指令模块，整合大盘择时、情绪数据、持仓管理和买入建议。"""
         total_capital = getattr(config, 'total_capital', 20000)
+        momentum_map  = momentum_map or {}
+        sentiment     = sentiment    or {}
 
         # ── 大盘择时信号 ──────────────────────────────────────
         timing = {"final_position": 2, "summary": "", "error": "未运行",
@@ -984,15 +1056,32 @@ class NotificationService(
         # ── 可用资金 ─────────────────────────────────────────
         available_cash = total_capital - invested_capital
 
-        # ── 个股ETF候选（排除已持仓，且可用资金充足）────────────
+        # ── 个股ETF候选（排除已持仓，动量前15 + AI买入信号）────────
         held_codes = set(positions.keys())
+        n_total    = len(results)
+        mo_cutoff  = max(n_total // 2, 10)   # 动量前50%才进候选（最少保留10名）
+
         buy_candidates = sorted(
             [r for r in results
              if getattr(r, 'decision_type', '') == 'buy'
-             and r.code not in held_codes],
-            key=lambda x: x.sentiment_score,
+             and r.code not in held_codes
+             and momentum_map.get(r.code, {}).get("rank", 999) <= mo_cutoff],
+            key=lambda x: (
+                x.sentiment_score * 0.5
+                + momentum_map.get(x.code, {}).get("score", 50) * 0.5
+            ),
             reverse=True,
         )[:3]
+
+        # 若动量过滤后无候选，退回到纯AI买入信号（保底）
+        if not buy_candidates:
+            buy_candidates = sorted(
+                [r for r in results
+                 if getattr(r, 'decision_type', '') == 'buy'
+                 and r.code not in held_codes],
+                key=lambda x: x.sentiment_score,
+                reverse=True,
+            )[:3]
         etf_n = len(buy_candidates)
 
         # ── 综合仓位决策 ─────────────────────────────────────
@@ -1032,6 +1121,37 @@ class NotificationService(
             )
         if timing_err:
             lines.append(f"- ⚠️ 择时计算备注：{timing_err}")
+
+        # ── 市场情绪数据 ──────────────────────────────────────
+        nb = sentiment.get("northbound", {})
+        lm = sentiment.get("limit",      {})
+        mg = sentiment.get("margin",     {})
+
+        if nb or lm or mg:
+            lines += ["", "**市场情绪**"]
+            if nb:
+                net   = nb.get("today_net", 0)
+                net5d = nb.get("net_5d", 0)
+                streak = nb.get("streak", 0)
+                streak_str = f"，连续{abs(streak)}日{'流入' if streak > 0 else '流出'}" if abs(streak) >= 2 else ""
+                lines.append(
+                    f"- 北向资金：今日 **{'+' if net >= 0 else ''}{net}亿**"
+                    f"（5日累计{'+' if net5d >= 0 else ''}{net5d}亿{streak_str}）"
+                )
+            if lm:
+                lines.append(
+                    f"- 市场情绪：涨停 **{lm.get('zt',0)}家** / 跌停 **{lm.get('dt',0)}家**"
+                    f"　比值 {lm.get('ratio',0)} → **{lm.get('sentiment','')}**"
+                )
+            if mg:
+                chg = mg.get("change5d", 0)
+                lines.append(
+                    f"- 两融余额：**{mg.get('balance',0):.0f}亿**"
+                    f"（5日{'+' if chg >= 0 else ''}{chg:.0f}亿 {mg.get('trend','')}）"
+                )
+
+        if flow_summary:
+            lines.append(f"- 聪明钱：{flow_summary}")
 
         lines += [""]
 
