@@ -133,15 +133,26 @@ def get_etf_momentum(
 
     df = pd.DataFrame(records)
 
-    # ── 动量评分：百分位排名加权 ───────────────────────────────
-    n = len(df)
-    # rank() 越大 = 收益越高；转为 0-1 百分位
-    df["pct20"] = df["ret20"].rank(ascending=True, na_option="bottom") / n
-    df["pct60"] = df["ret60"].rank(ascending=True, na_option="bottom") / n
-    df["momentum_score"] = ((df["pct20"] * 0.5 + df["pct60"] * 0.5) * 100).round(1)
+    # ── 动量评分：仅对有效数据排名 ────────────────────────────
+    valid = df["ret20"].notna() & df["ret60"].notna()
+    valid_count = valid.sum()
 
-    # 综合排名（1=最强）
-    df["rank"] = df["momentum_score"].rank(ascending=False, method="min", na_option="bottom").astype(int)
+    df["momentum_score"] = np.nan
+    df["rank"]           = np.nan
 
-    df = df.sort_values("momentum_score", ascending=False).reset_index(drop=True)
+    if valid_count >= 2:
+        valid_df = df.loc[valid].copy()
+        n = len(valid_df)
+        valid_df["pct20"] = valid_df["ret20"].rank(ascending=True) / n
+        valid_df["pct60"] = valid_df["ret60"].rank(ascending=True) / n
+        valid_df["momentum_score"] = ((valid_df["pct20"] * 0.5 + valid_df["pct60"] * 0.5) * 100).round(1)
+        # rank 在有效子集内排（1=最强，无效ETF不参与）
+        valid_df["rank"] = valid_df["momentum_score"].rank(ascending=False, method="min").astype(int)
+        df.loc[valid, "momentum_score"] = valid_df["momentum_score"].values
+        df.loc[valid, "rank"]           = valid_df["rank"].values
+    elif valid_count == 1:
+        df.loc[valid, "momentum_score"] = 50.0
+        df.loc[valid, "rank"]           = 1
+
+    df = df.sort_values("momentum_score", ascending=False, na_position="last").reset_index(drop=True)
     return df[["code", "ret20", "ret60", "rel_str", "momentum_score", "rank"]]

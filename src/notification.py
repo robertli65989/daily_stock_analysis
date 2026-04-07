@@ -19,6 +19,8 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
+import numpy as np
+
 from src.config import get_config
 from src.analyzer import AnalysisResult
 from src.enums import ReportType
@@ -353,7 +355,8 @@ class NotificationService(
             one  = (core.get('one_sentence') or r.analysis_summary or '—')[:38]
 
             mo_info  = momentum_map.get(r.code, {})
-            mo_rank  = f"#{mo_info['rank']}" if mo_info else "—"
+            _rank    = mo_info.get("rank") if mo_info else None
+            mo_rank  = f"#{int(_rank)}" if (_rank is not None and not (isinstance(_rank, float) and np.isnan(_rank))) else "—"
             flow_lbl = flow_map.get(r.code, "")[:12] if flow_map else ""
 
             lines.append(
@@ -386,12 +389,15 @@ class NotificationService(
                 # 量化指标摘要（动量 + 资金流）
                 quant_lines = []
                 if mo:
-                    n_total = len(results)
-                    ret20_s = f"{mo['ret20']:+.1f}%" if mo.get('ret20') is not None else "N/A"
-                    ret60_s = f"{mo['ret60']:+.1f}%" if mo.get('ret60') is not None else "N/A"
-                    rel_s   = f"{mo['rel']:+.1f}%" if mo.get('rel') is not None else "N/A"
+                    n_total   = len(results)
+                    _mo_rank  = mo.get("rank")
+                    rank_valid = _mo_rank is not None and not (isinstance(_mo_rank, float) and np.isnan(_mo_rank))
+                    rank_str  = f"**#{int(_mo_rank)}/{n_total}**" if rank_valid else "**数据获取中**"
+                    ret20_s   = f"{mo['ret20']:+.1f}%" if mo.get('ret20') is not None and not (isinstance(mo['ret20'], float) and np.isnan(mo['ret20'])) else "N/A"
+                    ret60_s   = f"{mo['ret60']:+.1f}%" if mo.get('ret60') is not None and not (isinstance(mo['ret60'], float) and np.isnan(mo['ret60'])) else "N/A"
+                    rel_s     = f"{mo['rel']:+.1f}%"   if mo.get('rel')   is not None and not (isinstance(mo['rel'],   float) and np.isnan(mo['rel']))   else "N/A"
                     quant_lines.append(
-                        f"动量排名：**#{mo['rank']}/{n_total}**（20日{ret20_s}｜60日{ret60_s}｜超额{rel_s}）"
+                        f"动量排名：{rank_str}（20日{ret20_s}｜60日{ret60_s}｜超额{rel_s}）"
                     )
                 if flow:
                     quant_lines.append(f"资金流向：**{flow}**")
