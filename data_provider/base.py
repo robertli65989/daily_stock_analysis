@@ -1462,11 +1462,16 @@ class DataFetcherManager:
         stock_code = normalize_stock_code(stock_code)
         static_name = STOCK_NAME_MAP.get(stock_code)
 
+        # 0. 静态映射表优先（权威名称，避免实时 API 返回错误名称）
+        if is_meaningful_stock_name(static_name, stock_code):
+            self._cache_stock_name(stock_code, static_name)
+            return static_name
+
         # 1. 先检查缓存
         cached_name = self._get_cached_stock_name(stock_code)
         if cached_name is not None:
             return cached_name
-        
+
         # 2. 尝试从实时行情中获取（最快，可按需禁用）
         if allow_realtime:
             quote = self.get_realtime_quote(raw_stock_code or stock_code, log_final_failure=False)
@@ -1475,9 +1480,6 @@ class DataFetcherManager:
                 self._cache_stock_name(stock_code, name)
                 logger.info(f"[股票名称] 从实时行情获取: {stock_code} -> {name}")
                 return name
-
-        if is_meaningful_stock_name(static_name, stock_code):
-            return self._cache_stock_name(stock_code, static_name) or static_name
 
         # 3. 依次尝试各个数据源
         from .akshare_fetcher import _is_us_code
