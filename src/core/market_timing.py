@@ -102,7 +102,7 @@ def _fetch_index_ohlc(symbol: str = _SYMBOL, lookback_days: int = 900) -> pd.Dat
             # 新浪返回列：date, open, high, low, close, volume
             raw2["date"] = pd.to_datetime(raw2["date"])
             raw2 = raw2.set_index("date").sort_index()
-            raw2 = raw2[raw2.index >= pd.Timestamp(start_date)]
+            # 不过滤日期，保留全量历史，确保 RSRS M=600 滚动窗口有足够数据
             df = raw2[["open", "high", "low", "close", "volume"]]
         except Exception as exc2:
             logger.error(f"备用数据源也失败: {exc2}")
