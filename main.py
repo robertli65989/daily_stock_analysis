@@ -529,7 +529,43 @@ def run_full_analysis(
             if parts:
                 combined_content = "\n\n---\n\n".join(parts)
                 if pipeline.notifier.is_available():
-                    if pipeline.notifier.send(combined_content, email_send_to_all=True):
+                    from src.notification import NotificationChannel
+                    channels = pipeline.notifier.get_available_channels()
+                    merge_success = False
+                    for _ch in channels:
+                        if _ch == NotificationChannel.EMAIL:
+                            # 邮件：发完整合并报告（大盘复盘 + ETF轮动）
+                            _r = pipeline.notifier.send_to_email(combined_content)
+                        elif _ch == NotificationChannel.SERVERCHAN3 and is_etf_rotation:
+                            # ETF轮动模式：Server酱3只发操作指令部分，完整报告通过邮件发送
+                            _etf_part = dashboard_content if 'dashboard_content' in dir() else combined_content
+                            _POOL_MARKER = "## 📊 全池速览"
+                            if _POOL_MARKER in _etf_part:
+                                _sc3 = _etf_part.split(_POOL_MARKER)[0].rstrip()
+                                _sc3 += "\n\n> 📧 完整报告（全池速览+买入详情+大盘复盘）请查收邮件"
+                            else:
+                                _sc3 = _etf_part
+                            _r = pipeline.notifier.send_to_serverchan3(_sc3)
+                        elif _ch == NotificationChannel.SERVERCHAN3:
+                            _r = pipeline.notifier.send_to_serverchan3(combined_content)
+                        elif _ch == NotificationChannel.FEISHU:
+                            _r = pipeline.notifier.send_to_feishu(combined_content)
+                        elif _ch == NotificationChannel.TELEGRAM:
+                            _r = pipeline.notifier.send_to_telegram(combined_content)
+                        elif _ch == NotificationChannel.DISCORD:
+                            _r = pipeline.notifier.send_to_discord(combined_content)
+                        elif _ch == NotificationChannel.PUSHPLUS:
+                            _r = pipeline.notifier.send_to_pushplus(combined_content)
+                        elif _ch == NotificationChannel.PUSHOVER:
+                            _r = pipeline.notifier.send_to_pushover(combined_content)
+                        elif _ch == NotificationChannel.ASTRBOT:
+                            _r = pipeline.notifier.send_to_astrbot(combined_content)
+                        elif _ch == NotificationChannel.SLACK:
+                            _r = pipeline.notifier.send_to_slack(combined_content)
+                        else:
+                            _r = False
+                        merge_success = _r or merge_success
+                    if merge_success:
                         logger.info("已合并推送（个股+大盘复盘）")
                     else:
                         logger.warning("合并推送失败")

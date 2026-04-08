@@ -1647,7 +1647,18 @@ class StockAnalysisPipeline:
                     elif channel == NotificationChannel.PUSHPLUS:
                         non_wechat_success = self.notifier.send_to_pushplus(report) or non_wechat_success
                     elif channel == NotificationChannel.SERVERCHAN3:
-                        non_wechat_success = self.notifier.send_to_serverchan3(report) or non_wechat_success
+                        if report_type == ReportType.ETF_ROTATION:
+                            # ETF轮动模式：Server酱3只发操作指令部分（全池速览表+买入详情通过邮件发送）
+                            # 设计意图：长文本→邮件，精简操作指令→Server酱3手机推送
+                            _POOL_MARKER = "## 📊 全池速览"
+                            if _POOL_MARKER in report:
+                                sc3_report = report.split(_POOL_MARKER)[0].rstrip()
+                                sc3_report += "\n\n> 📧 完整报告（全池速览+买入详情）请查收邮件"
+                            else:
+                                sc3_report = report
+                            non_wechat_success = self.notifier.send_to_serverchan3(sc3_report) or non_wechat_success
+                        else:
+                            non_wechat_success = self.notifier.send_to_serverchan3(report) or non_wechat_success
                     elif channel == NotificationChannel.DISCORD:
                         non_wechat_success = self.notifier.send_to_discord(report) or non_wechat_success
                     elif channel == NotificationChannel.PUSHOVER:
