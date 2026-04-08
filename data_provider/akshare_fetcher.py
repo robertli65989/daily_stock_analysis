@@ -597,7 +597,42 @@ class AkshareFetcher(BaseFetcher):
         except Exception as e2:
             logger.warning(f"ak.fund_etf_hist_sina 也失败: {e2}")
 
-        raise DataFetchError(f"Akshare 获取 ETF {stock_code} 数据失败（东财+新浪均失败）")
+        # 终极备用：Yahoo Finance（yfinance，全球可访问，GitHub Actions 可用）
+        try:
+            import yfinance as yf
+            import pandas as pd
+            # 根据代码前缀确定交易所后缀：5/6开头→上交所.SS，1/3开头→深交所.SZ
+            if stock_code.startswith(('5', '6')):
+                yf_symbol = f"{stock_code}.SS"
+            else:
+                yf_symbol = f"{stock_code}.SZ"
+            logger.info(f"[API调用] yfinance.download(symbol={yf_symbol})")
+            api_start = _time.time()
+            df_yf = yf.download(yf_symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
+            api_elapsed = _time.time() - api_start
+            if df_yf is not None and not df_yf.empty:
+                # yfinance 列名为多级索引或单级，统一展平
+                if isinstance(df_yf.columns, pd.MultiIndex):
+                    df_yf.columns = df_yf.columns.get_level_values(0)
+                df_yf = df_yf.rename(columns={
+                    "Open": "开盘", "High": "最高", "Low": "最低",
+                    "Close": "收盘", "Volume": "成交量",
+                })
+                df_yf["日期"] = df_yf.index.strftime("%Y-%m-%d")
+                df_yf = df_yf.reset_index(drop=True)
+                # 保留所需列
+                keep_cols = ["日期", "开盘", "最高", "最低", "收盘", "成交量"]
+                df_yf = df_yf[[c for c in keep_cols if c in df_yf.columns]]
+                # 计算涨跌幅
+                df_yf["涨跌幅"] = df_yf["收盘"].pct_change() * 100
+                df_yf["涨跌幅"] = df_yf["涨跌幅"].fillna(0)
+                logger.info(f"[API返回] yfinance 成功: {yf_symbol} 返回 {len(df_yf)} 行数据, 耗时 {api_elapsed:.2f}s")
+                return df_yf
+            logger.warning(f"[API返回] yfinance 返回空数据: {yf_symbol}")
+        except Exception as e3:
+            logger.warning(f"yfinance 也失败: {e3}")
+
+        raise DataFetchError(f"Akshare 获取 ETF {stock_code} 数据失败（东财+新浪+Yahoo均失败）")
     
     def _fetch_us_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
