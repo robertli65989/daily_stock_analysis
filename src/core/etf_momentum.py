@@ -73,18 +73,17 @@ def _fetch_close(code: str, calendar_days: int = _CALENDAR_BUFFER) -> Optional[p
     except Exception as exc2:
         logger.debug(f"[动量] ETF {code} 新浪接口也失败: {exc2}")
 
-    # 终极备用：Yahoo Finance（全球可访问，GitHub Actions 无封锁）
+    # 终极备用：Yahoo Finance（Ticker.history() API，返回标准 Series，无歧义）
     try:
         import yfinance as yf
         yf_symbol = f"{code}.SS" if code.startswith(('5', '6')) else f"{code}.SZ"
-        df_yf = yf.download(yf_symbol, start=start_date.strftime("%Y-%m-%d"),
-                            end=end_date.strftime("%Y-%m-%d"), progress=False, auto_adjust=True)
-        if df_yf is not None and not df_yf.empty:
-            if isinstance(df_yf.columns, pd.MultiIndex):
-                df_yf.columns = df_yf.columns.get_level_values(0)
-            close_col = next((c for c in df_yf.columns if c.lower() in ("close", "adj close")), None)
-            if close_col:
-                return df_yf[close_col].dropna()
+        ticker = yf.Ticker(yf_symbol)
+        df_yf = ticker.history(start=start_date.strftime("%Y-%m-%d"),
+                               end=end_date.strftime("%Y-%m-%d"), auto_adjust=True)
+        if df_yf is not None and not df_yf.empty and "Close" in df_yf.columns:
+            close_series = df_yf["Close"].dropna()
+            if isinstance(close_series, pd.Series) and len(close_series) > 0:
+                return close_series
     except Exception as exc3:
         logger.debug(f"[动量] ETF {code} yfinance 也失败: {exc3}")
 
