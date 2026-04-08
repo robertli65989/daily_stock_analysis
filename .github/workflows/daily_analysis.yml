@@ -192,6 +192,7 @@ jobs:
           # 系统配置
           # ==========================================
           LOG_LEVEL: INFO
+          LITELLM_LOG: ERROR
           MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
           TOTAL_CAPITAL: ${{ vars.TOTAL_CAPITAL || secrets.TOTAL_CAPITAL || '20000' }}
           # 筹码分布：默认 false（云端接口不稳定）；需启用时在 Settings → Variables 添加 ENABLE_CHIP_DISTRIBUTION=true
