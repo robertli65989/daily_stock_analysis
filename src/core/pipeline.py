@@ -1648,12 +1648,25 @@ class StockAnalysisPipeline:
                         non_wechat_success = self.notifier.send_to_pushplus(report) or non_wechat_success
                     elif channel == NotificationChannel.SERVERCHAN3:
                         if report_type == ReportType.ETF_ROTATION:
-                            # ETF轮动模式：Server酱3只发操作指令部分（全池速览表+买入详情通过邮件发送）
-                            # 设计意图：长文本→邮件，精简操作指令→Server酱3手机推送
+                            # ETF轮动模式：Server酱3发"操作指令 + 全池速览前5行"，完整报告通过邮件发送
+                            # 设计意图：长文本→邮件，精简指令+个股摘要→Server酱3手机推送
                             _POOL_MARKER = "## 📊 全池速览"
                             if _POOL_MARKER in report:
-                                sc3_report = report.split(_POOL_MARKER)[0].rstrip()
-                                sc3_report += "\n\n> 📧 完整报告（全池速览+买入详情）请查收邮件"
+                                _parts = report.split(_POOL_MARKER, 1)
+                                _directive = _parts[0].rstrip()
+                                # 提取全池速览前5行数据（表头+分隔线+前5条ETF记录）
+                                _pool_lines = (_POOL_MARKER + _parts[1]).split('\n')
+                                _brief, _data_count = [], 0
+                                for _ln in _pool_lines:
+                                    _brief.append(_ln)
+                                    if _ln.startswith('|') and '---' not in _ln and '代码' not in _ln:
+                                        _data_count += 1
+                                    if _data_count >= 5:
+                                        break
+                                sc3_report = (
+                                    _directive + '\n\n' + '\n'.join(_brief)
+                                    + '\n\n> 📧 完整列表（全30只ETF+买入详情）请查收邮件'
+                                )
                             else:
                                 sc3_report = report
                             non_wechat_success = self.notifier.send_to_serverchan3(sc3_report) or non_wechat_success

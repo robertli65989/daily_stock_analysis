@@ -537,12 +537,24 @@ def run_full_analysis(
                             # 邮件：发完整合并报告（大盘复盘 + ETF轮动）
                             _r = pipeline.notifier.send_to_email(combined_content)
                         elif _ch == NotificationChannel.SERVERCHAN3 and is_etf_rotation:
-                            # ETF轮动模式：Server酱3只发操作指令部分，完整报告通过邮件发送
+                            # ETF轮动模式：Server酱3发"操作指令 + 全池速览前5行"，完整报告通过邮件发送
                             _etf_part = dashboard_content if 'dashboard_content' in dir() else combined_content
                             _POOL_MARKER = "## 📊 全池速览"
                             if _POOL_MARKER in _etf_part:
-                                _sc3 = _etf_part.split(_POOL_MARKER)[0].rstrip()
-                                _sc3 += "\n\n> 📧 完整报告（全池速览+买入详情+大盘复盘）请查收邮件"
+                                _ep = _etf_part.split(_POOL_MARKER, 1)
+                                _directive = _ep[0].rstrip()
+                                _pool_lines = (_POOL_MARKER + _ep[1]).split('\n')
+                                _brief, _data_count = [], 0
+                                for _ln in _pool_lines:
+                                    _brief.append(_ln)
+                                    if _ln.startswith('|') and '---' not in _ln and '代码' not in _ln:
+                                        _data_count += 1
+                                    if _data_count >= 5:
+                                        break
+                                _sc3 = (
+                                    _directive + '\n\n' + '\n'.join(_brief)
+                                    + '\n\n> 📧 完整列表（全30只ETF+买入详情+大盘复盘）请查收邮件'
+                                )
                             else:
                                 _sc3 = _etf_part
                             _r = pipeline.notifier.send_to_serverchan3(_sc3)
