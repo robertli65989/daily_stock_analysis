@@ -280,8 +280,10 @@ class NotificationService(
         momentum_map: dict = {}
         if momentum_df is not None and not momentum_df.empty:
             for _, row in momentum_df.iterrows():
+                import pandas as _pd
+                _rank_val = row["rank"]
                 momentum_map[row["code"]] = {
-                    "rank":  int(row["rank"]),
+                    "rank":  int(_rank_val) if (_rank_val is not None and not _pd.isna(_rank_val)) else None,
                     "ret20": row["ret20"],
                     "ret60": row["ret60"],
                     "rel":   row["rel_str"],
