@@ -62,6 +62,12 @@ class Serverchan3Sender:
             date_str = datetime.now().strftime('%Y-%m-%d')
             title = f"📈 股票分析报告 - {date_str}"
 
+        # Server酱3 desp 字段上限约 4096 字，超出截断并提示查邮件
+        SERVERCHAN3_MAX_LEN = 4000
+        if len(content) > SERVERCHAN3_MAX_LEN:
+            content = content[:SERVERCHAN3_MAX_LEN] + "\n\n---\n> ⚠️ 内容过长已截断，完整报告请查收邮件"
+            logger.warning(f"Server酱3 内容超限，已截断至 {SERVERCHAN3_MAX_LEN} 字符")
+
         try:
             # 根据 sendkey 格式构造 URL
             sendkey = self._serverchan3_sendkey
