@@ -1261,7 +1261,7 @@ class NotificationService(
             [r for r in results
              if getattr(r, 'decision_type', '') == 'buy'
              and r.code not in held_codes
-             and momentum_map.get(r.code, {}).get("rank", 999) <= mo_cutoff],
+             and (momentum_map.get(r.code, {}).get("rank") or 999) <= mo_cutoff],
             key=lambda x: (
                 x.sentiment_score * 0.5
                 + momentum_map.get(x.code, {}).get("score", 50) * 0.5
