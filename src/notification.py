@@ -1383,6 +1383,51 @@ class NotificationService(
             f"{name}{_vote_icon(v)}" for name, v in vote_detail.items()
         ) if vote_detail else "—"
 
+        # 综合结论（用户能直接读懂的一句话）
+        if override_reason:
+            timing_conclusion = f"⚠️ **风控强制空仓**：{override_reason}"
+        elif final_pos == 0:
+            timing_conclusion = "🔴 **结论：空仓**，大盘趋势向下，建议清仓等待"
+        elif final_pos == 1:
+            timing_conclusion = "🟡 **结论：半仓**，信号分歧，控制仓位为主"
+        elif vote_total >= 4:
+            timing_conclusion = "🚀 **结论：满仓**，五指标共振向上，可积极布局"
+        else:
+            timing_conclusion = "🟢 **结论：正常持仓**，多头格局维持，持仓待涨"
+
+        # 各指标解读文字
+        rsrs_meaning  = "→ 支撑偏弱，不追高" if rsrs_val is not None and 0 <= rsrs_val < 0.3 else \
+                        "→ 强势支撑，趋势健康" if rsrs_val is not None and rsrs_val >= 0.3 else \
+                        "→ 支撑走弱，注意回调" if rsrs_val is not None else ""
+        ali_meaning   = "→ 三线分叉，趋势成立" if ali_state == "bull" else \
+                        "→ 三线闭合，趋势反转" if ali_state == "bear" else \
+                        "→ 三线粘合，方向未明"
+        ma_meaning    = "→ 价格站上双均线，趋势多头" if ma_state == "bull" else \
+                        "→ 价格跌破双均线，趋势空头" if ma_state == "bear" else \
+                        "→ 均线交织，震荡等待方向"
+        roc_meaning   = ""
+        if roc_val is not None:
+            if roc_val > 5:
+                roc_meaning = "→ 涨幅偏快，短期或有获利回吐"
+            elif roc_val > 3:
+                roc_meaning = "→ 动能偏强，趋势良好"
+            elif roc_val > -3:
+                roc_meaning = "→ 动能中性，趋势平稳"
+            else:
+                roc_meaning = "→ 近期持续下跌，谨慎"
+        rsi_meaning   = ""
+        if rsi_val is not None:
+            if rsi_val > 70:
+                rsi_meaning = "（超买，注意回调）"
+            elif rsi_val > 60:
+                rsi_meaning = "（偏热，可持有但不追）"
+            elif rsi_val > 40:
+                rsi_meaning = "（中性，持仓安全）"
+            elif rsi_val > 30:
+                rsi_meaning = "（偏冷，关注企稳）"
+            else:
+                rsi_meaning = "（超卖，关注反弹）"
+
         lines = [
             "## 🚀 今日操作指令",
             "",
@@ -1390,15 +1435,13 @@ class NotificationService(
             "",
             f"**大盘择时（五指标投票：{vote_total}/5）**",
             f"- {vote_bar}",
-            f"- RSRS钝化：`{rsrs_str}` {rsrs_desc}",
-            f"- 鳄鱼线：{ali_emoji}",
-            f"- MA20/60：{ma_emoji}"
-            + (f"（MA20={timing['ma20']}  MA60={timing['ma60']}）" if timing.get("ma20") and timing.get("ma60") else ""),
-            f"- ROC20：`{roc_val:+.1f}%`" if roc_val is not None else "- ROC20：N/A",
-            f"- RSI14：`{rsi_val:.1f}`" + (
-                "  超买区" if rsi_val and rsi_val > 70 else
-                "  超卖区" if rsi_val and rsi_val < 30 else ""
-            ) if rsi_val is not None else "- RSI14：N/A",
+            f"- {timing_conclusion}",
+            f"- RSRS钝化：`{rsrs_str}` {rsrs_desc}　{rsrs_meaning}",
+            f"- 鳄鱼线：{ali_emoji}　{ali_meaning}",
+            f"- MA20/60：{ma_emoji}　{ma_meaning}"
+            + (f"　（MA20={timing['ma20']}  MA60={timing['ma60']}）" if timing.get("ma20") and timing.get("ma60") else ""),
+            (f"- ROC20：`{roc_val:+.1f}%`　{roc_meaning}") if roc_val is not None else "- ROC20：N/A",
+            (f"- RSI14：`{rsi_val:.1f}`{rsi_meaning}") if rsi_val is not None else "- RSI14：N/A",
         ]
 
         if override_reason:
@@ -1472,23 +1515,68 @@ class NotificationService(
         amounts    = [int(capital_to_use * w // 100 * 100) for w in weights]  # 取整到百元
         self._save_recommended_positions(selected, amounts, final_pos)
 
-        lines += ["**💡 新仓买入建议**", ""]
-        lines += ["| 操作 | 代码 | 名称 | 评分 | 建议金额 | 参考份数 |",
-                  "|------|------|------|------|---------|---------|"]
+        # ── 满仓时的调仓建议 ─────────────────────────────────
+        # 当可用资金不足500元时，判断是否有必要换仓
+        if available_cash < 500 and positions and selected:
+            # 找出持仓中评分最低的
+            worst_hold_code, worst_hold_score = None, 999
+            for code, pos in positions.items():
+                r = result_map.get(code)
+                sc = r.sentiment_score if r else 0
+                if sc < worst_hold_score:
+                    worst_hold_score = sc
+                    worst_hold_code  = code
+            # 找出新候选中评分最高的
+            best_new = selected[0] if selected else None
+            best_new_score = best_new.sentiment_score if best_new else 0
 
-        for r, amt in zip(selected, amounts):
-            name  = getattr(r, 'name', '') or r.code
-            score = r.sentiment_score
-            cur_p = getattr(r, 'current_price', None)
-            shares_hint = f"约{int(amt / cur_p / 100) * 100}份" if cur_p and cur_p > 0 else "—"
-            lines.append(f"| 🟢 买入 | {r.code} | {name} | {score}/100 | ¥{amt:,} | {shares_hint} |")
+            lines += ["**💡 新仓候选（供参考，当前近满仓）**", ""]
+            lines += [
+                "| 候选 | 代码 | 名称 | 评分 | 说明 |",
+                "|------|------|------|------|------|",
+            ]
+            for r in selected:
+                name = getattr(r, 'name', '') or r.code
+                lines.append(f"| 🟢 候选 | {r.code} | {name} | {r.sentiment_score}/100 | AI买入信号+动量共振 |")
 
-        cash_after = available_cash - sum(amounts)
-        if cash_after > 0:
-            lines.append(f"| 💰 现金 | — | 待机 | — | ¥{cash_after:,.0f} | — |")
+            lines += [""]
+
+            # 调仓决策建议
+            swap_threshold = 10  # 新仓评分比最弱持仓高10分才值得换
+            if worst_hold_code and best_new_score > worst_hold_score + swap_threshold:
+                worst_name = positions[worst_hold_code].get("name", worst_hold_code)
+                best_name  = getattr(best_new, 'name', '') or best_new.code
+                lines += [
+                    f"> 💡 **调仓建议**：可考虑卖出 **{worst_name}({worst_hold_code})** 评分{worst_hold_score}分，"
+                    f"换入 **{best_name}({best_new.code})** 评分{best_new_score}分"
+                    f"（评分差{best_new_score - worst_hold_score}分，超过调仓门槛）",
+                    "",
+                ]
+            else:
+                lines += [
+                    "> ✅ **维持现有持仓**：新候选评分与现有持仓差距不足10分，换仓成本高于收益，建议持仓不动",
+                    "",
+                ]
+        else:
+            # 正常有资金时的买入建议表
+            lines += ["**💡 新仓买入建议**", ""]
+            lines += ["| 操作 | 代码 | 名称 | 评分 | 建议金额 | 参考份数 |",
+                      "|------|------|------|------|---------|---------|"]
+
+            for r, amt in zip(selected, amounts):
+                name  = getattr(r, 'name', '') or r.code
+                score = r.sentiment_score
+                cur_p = getattr(r, 'current_price', None)
+                shares_hint = f"约{int(amt / cur_p / 100) * 100}份" if cur_p and cur_p > 0 else "—"
+                lines.append(f"| 🟢 买入 | {r.code} | {name} | {score}/100 | ¥{amt:,} | {shares_hint} |")
+
+            cash_after = available_cash - sum(amounts)
+            if cash_after > 0:
+                lines.append(f"| 💰 现金 | — | 待机 | — | ¥{cash_after:,.0f} | — |")
+
+            lines += [""]
 
         lines += [
-            "",
             f"> {position_note}",
             "",
             "---",
