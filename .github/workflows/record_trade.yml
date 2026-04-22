@@ -1,0 +1,70 @@
+name: 记录交易
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: '操作类型'
+        required: true
+        type: choice
+        options:
+          - buy      # 买入：新建或更新持仓，标记 confirmed=true
+          - sell     # 卖出：清除持仓
+          - confirm  # 确认：锁定当前自动推荐仓位（不再被自动覆盖）
+      code:
+        description: 'ETF代码（如 515880）'
+        required: true
+        type: string
+      shares:
+        description: '份数（buy 时必填，如 500）'
+        required: false
+        type: string
+      price:
+        description: '成本价（buy 时必填，如 1.095）'
+        required: false
+        type: string
+      date:
+        description: '交易日期（可选，默认今天，格式 YYYY-MM-DD）'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 执行交易记录
+        env:
+          TRADE_ACTION: ${{ github.event.inputs.action }}
+          TRADE_CODE:   ${{ github.event.inputs.code }}
+          TRADE_SHARES: ${{ github.event.inputs.shares }}
+          TRADE_PRICE:  ${{ github.event.inputs.price }}
+          TRADE_DATE:   ${{ github.event.inputs.date }}
+        run: python scripts/record_trade.py
+
+      - name: 提交持仓更新
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add portfolio.json
+          if ! git diff --cached --quiet; then
+            ACTION="${{ github.event.inputs.action }}"
+            CODE="${{ github.event.inputs.code }}"
+            git commit -m "feat: 手动记录交易 ${ACTION} ${CODE}"
+            git push
+            echo "✅ portfolio.json 已更新并推送"
+          else
+            echo "portfolio.json 无变化"
+          fi

@@ -1124,6 +1124,54 @@ class NotificationService(
         except Exception:
             return {"total_capital": 20000, "positions": {}}
 
+    def _save_recommended_positions(self, selected: list, amounts: list, final_pos: int) -> None:
+        """Plan A：将本次推荐仓位写回 portfolio.json。
+
+        规则：
+        - confirmed=True 的持仓（用户通过 record_trade workflow 手动确认）永远不覆盖
+        - confirmed=False / 无 confirmed 字段 的仓位视为上次自动推荐，先清空再写入新推荐
+        - final_pos==0（空仓信号）或无推荐标的时：只清空自动仓位，不写入新仓位
+        """
+        import json
+        from pathlib import Path
+        from datetime import date as _date
+
+        portfolio_path = Path(__file__).parent.parent / "portfolio.json"
+        portfolio = self._load_portfolio()
+        positions = portfolio.get("positions", {})
+
+        # 保留用户手动确认的仓位，清空上次自动推荐
+        positions = {k: v for k, v in positions.items() if v.get("confirmed", False)}
+
+        if final_pos > 0 and selected:
+            today = _date.today().strftime("%Y-%m-%d")
+            for r, amt in zip(selected, amounts):
+                if r.code in positions:
+                    continue  # 用户已手动确认该标的，不覆盖
+                cur_p = getattr(r, "current_price", None)
+                if not cur_p or cur_p <= 0:
+                    continue
+                shares = int(amt / cur_p / 100) * 100
+                if shares <= 0:
+                    continue
+                positions[r.code] = {
+                    "name": getattr(r, "name", "") or r.code,
+                    "shares": shares,
+                    "cost_price": round(cur_p, 4),
+                    "buy_date": today,
+                    "stop_loss_pct": 0.05,
+                    "confirmed": False,
+                    "auto_note": f"系统推荐，AI评分{r.sentiment_score}/100",
+                }
+
+        portfolio["positions"] = positions
+        try:
+            with open(portfolio_path, "w", encoding="utf-8") as f:
+                json.dump(portfolio, f, ensure_ascii=False, indent=2)
+            logger.info("[持仓] 自动更新 portfolio.json，仓位：%s", list(positions.keys()))
+        except Exception as exc:
+            logger.warning("[持仓] 写入 portfolio.json 失败：%s", exc)
+
     def _generate_rotation_directive(
         self,
         results: List[AnalysisResult],
@@ -1362,6 +1410,7 @@ class NotificationService(
         lines += holding_lines
 
         if effective_n == 0:
+            self._save_recommended_positions([], [], final_pos)
             lines += [
                 f"> {position_note}",
                 "",
@@ -1377,6 +1426,7 @@ class NotificationService(
         weights    = weight_map.get(effective_n, [1.0 / effective_n] * effective_n)
         capital_to_use = min(available_cash, total_capital if final_pos == 2 else total_capital * 0.5)
         amounts    = [int(capital_to_use * w // 100 * 100) for w in weights]  # 取整到百元
+        self._save_recommended_positions(selected, amounts, final_pos)
 
         lines += ["**💡 新仓买入建议**", ""]
         lines += ["| 操作 | 代码 | 名称 | 评分 | 建议金额 | 参考份数 |",
