@@ -411,8 +411,8 @@ class NotificationService(
                     rs     = row.get("rs", float("nan"))
                     prefix = "🏛️" if row.get("is_broad_base") else "🏦"
                     bar    = _bar(rt, max_rt)
-                    rs_str = f"  vs300:{rs:+.1f}%" if not pd.isna(rs) else ""
-                    rt_str = f"{rt:.1f}x" if not pd.isna(rt) else "—"
+                    rs_str = f"  vs300:{rs:+.1f}%" if not np.isnan(rs) else ""
+                    rt_str = f"{rt:.1f}x" if not np.isnan(rt) else "—"
                     lines.append(f"{prefix} {name}({row['code']})  量比{rt_str}  {bar}{rs_str}")
                 lines.append("```")
                 lines.append("")
@@ -426,8 +426,8 @@ class NotificationService(
                     rt     = row.get(rel_col, float("nan"))
                     rs     = row.get("rs", float("nan"))
                     bar    = _bar(rt, max_rt)
-                    rs_str = f"  vs300:{rs:+.1f}%" if not pd.isna(rs) else ""
-                    rt_str = f"{rt:.1f}x" if not pd.isna(rt) else "—"
+                    rs_str = f"  vs300:{rs:+.1f}%" if not np.isnan(rs) else ""
+                    rt_str = f"{rt:.1f}x" if not np.isnan(rt) else "—"
                     lines.append(f"⚠️ {name}({row['code']})  量比{rt_str}  {bar}{rs_str}")
                 lines.append("```")
                 lines.append("")
@@ -438,7 +438,7 @@ class NotificationService(
                 for _, row in active_rows.iterrows():
                     name = _NAME_MAP.get(row["code"], row["code"])
                     rt   = row.get(rel_col, float("nan"))
-                    rt_str = f"{rt:.1f}x" if not pd.isna(rt) else "—"
+                    rt_str = f"{rt:.1f}x" if not np.isnan(rt) else "—"
                     lines.append(f"🔄 {name}({row['code']})  量比{rt_str}")
                 lines.append("```")
                 lines.append("")
