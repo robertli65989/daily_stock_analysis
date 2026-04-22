@@ -1,45 +1,66 @@
 # -*- coding: utf-8 -*-
 """
-ETF 资金流向追踪模块（国家队/聪明钱信号）
-==========================================
-通过追踪ETF规模（总资产/份额）的变化，识别机构资金的流入流出行为。
+ETF 资金流向 & 流动性监测模块 v2
+==================================
+改进点（v1 → v2）：
+  - 移除对不稳定 net_inflow 字段的依赖
+  - 改用 换手率相对强度 + 量价配合 判断资金流向
+  - 新增 ETF相对强弱（vs 沪深300）识别板块轮动
+  - 所有指标均来自 fund_etf_spot_em() 单次调用，境外IP友好
 
-核心逻辑：
-  当某只宽基ETF（沪深300/中证500/创业板）规模快速增长，
-  且增长速度明显超过净值涨幅时 → 净份额在增加 → 机构/国家队在主动申购。
+核心逻辑
+--------
+1. 换手率（Turnover Rate）
+     turnover = 今日成交额(亿) / ETF规模(亿) × 100 (%)
+     → 自动适配不同规模ETF，300亿和30亿ETF可以公平比较
 
-  规模变化率 ≈ 净值涨幅 + 净申购贡献
-  净申购信号强度 = 规模变化率 - 净值涨幅
+2. 相对换手率（Relative Turnover）
+     rel_turnover = 该ETF换手率 / 池内中位换手率
+     → > 2.0 表示今日活跃度是平均水平的2倍，属于异常放量
 
-宽基ETF（国家队首选）：510300 510500 159915 588000 159659
-  → 出现大幅净申购时，标注"🏛️国家队信号"
+3. 量价配合信号
+     rel_turnover + price_chg 组合判断：
+       放量上涨 → 资金主动买入（bullish）
+       放量下跌 → 资金主动卖出（bearish）
+       缩量    → 市场对该ETF兴趣低，流动性差
 
-行业ETF：其他25只
-  → 出现大幅净申购时，标注"🏦机构流入"
+4. ETF相对强弱（vs 300）
+     rs = ETF今日涨跌幅 - 沪深300今日涨跌幅
+     → 正值：跑赢大盘，资金轮入；负值：跑输大盘，资金轮出
 
-数据源：ak.fund_etf_spot_em（实时ETF行情，含规模字段）
+数据源：ak.fund_etf_spot_em（东方财富ETF实时行情）
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 宽基ETF（国家队主要操作标的）
+# 宽基ETF（国家队主要操作标的，放量信号额外标注）
 _BROAD_BASE_ETFS = {"510300", "510500", "159915", "588000", "159659", "512800"}
 
-# 净申购信号阈值（规模增长率减去净值涨幅，单位：%）
-_STRONG_INFLOW_THRESHOLD  = 1.5   # 强流入：净申购贡献 > 1.5%（5日）
-_STRONG_OUTFLOW_THRESHOLD = -1.5  # 强流出
+# 相对换手率阈值
+_REL_STRONG   = 2.0   # 相对换手率 ≥ 2 → 显著放量
+_REL_MILD     = 1.4   # 相对换手率 ≥ 1.4 → 温和放量
+_REL_QUIET    = 0.45  # 相对换手率 ≤ 0.45 → 显著缩量
+
+# 价格变动阈值（配合量能判断方向，百分比）
+_PRICE_UP     = 0.3   # 涨超 0.3% 才算上涨放量（过滤横盘噪声）
+_PRICE_DOWN   = -0.3  # 跌超 0.3% 才算下跌放量
+
+# 相对强弱阈值（vs 沪深300，百分比）
+_RS_STRONG    = 0.8   # 跑赢300超过0.8% → 明显强势
+_RS_WEAK      = -0.8  # 跑输300超过0.8% → 明显弱势
 
 
 def _fetch_etf_spot() -> pd.DataFrame:
     """
-    拉取ETF实时行情（东方财富），含规模字段。
-    返回 DataFrame，失败返回空 DataFrame。
+    拉取ETF实时行情（东方财富），返回标准化 DataFrame。
+    成功：含 code/name/scale/amount/chg_pct 列
+    失败：返回空 DataFrame
     """
     try:
         import akshare as ak
@@ -48,150 +69,202 @@ def _fetch_etf_spot() -> pd.DataFrame:
             return pd.DataFrame()
         return df
     except Exception as exc:
-        logger.warning(f"[资金流] ETF实时数据获取失败: {exc}")
+        logger.warning("[资金流v2] ETF实时数据获取失败: %s", exc)
         return pd.DataFrame()
 
 
-def _fetch_etf_hist_scale(code: str, days: int = 10) -> pd.Series:
+def _normalize_spot(spot_df: pd.DataFrame) -> pd.DataFrame:
     """
-    获取ETF历史规模序列（亿元），用于计算5日变化。
-    使用 fund_etf_fund_info_em（东方财富基金详情）。
+    识别并统一列名，转换数值类型。
+    返回含 code/name/scale/amount/chg_pct 的 DataFrame（缺失列为 NaN）。
     """
-    try:
-        import akshare as ak
-        df = ak.fund_etf_fund_info_em(fund=code, period="1")
-        if df is None or df.empty:
-            return pd.Series(dtype=float)
-        # 东方财富返回列：净值日期, 单位净值, 累计净值, 日增长率, 申购状态, 赎回状态
-        # 注意：这个接口返回的是净值，不是规模。规模需要另一个接口
-        return pd.Series(dtype=float)
-    except Exception:
-        return pd.Series(dtype=float)
+    col_map: dict = {}
+    for col in spot_df.columns:
+        s = str(col)
+        if "代码" in s or s.lower() == "symbol":
+            col_map["code"] = col
+        elif "名称" in s:
+            col_map["name"] = col
+        elif "规模" in s or "资产" in s:
+            col_map["scale"] = col
+        elif "成交额" in s:
+            col_map["amount"] = col
+        elif "涨跌幅" in s or "涨跌%" in s:
+            col_map["chg_pct"] = col
+
+    if "code" not in col_map:
+        logger.warning("[资金流v2] 无法识别ETF代码列，跳过分析")
+        return pd.DataFrame()
+
+    df = spot_df.rename(columns={v: k for k, v in col_map.items()}).copy()
+    df["code"] = df["code"].astype(str).str.strip().str.zfill(6)
+
+    for col in ["scale", "amount", "chg_pct"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        else:
+            df[col] = np.nan
+
+    return df
+
+
+def _get_hs300_chg(spot_df: pd.DataFrame) -> float:
+    """从 spot_df 里取沪深300（510300）当日涨跌幅作为基准，找不到返回 NaN。"""
+    row = spot_df[spot_df["code"] == "510300"]
+    if row.empty or pd.isna(row["chg_pct"].iloc[0]):
+        return float("nan")
+    return float(row["chg_pct"].iloc[0])
 
 
 def get_etf_fund_flow(codes: List[str]) -> pd.DataFrame:
     """
-    分析30只ETF的资金流向信号。
+    分析 ETF 池资金流向与流动性。
 
     Returns
     -------
     DataFrame，列：
-        code | name | scale（亿元）| chg_pct（今日涨跌%）|
-        flow_signal（strong_in/mild_in/neutral/mild_out/strong_out）|
-        is_broad_base | label（展示文本）
-    按 flow_signal 强度排序
+        code | flow_signal | label | turnover | rel_turnover | rs | is_broad_base
+    按 flow_signal 强度排序（strong_in 优先）
     """
-    spot_df = _fetch_etf_spot()
-    if spot_df.empty:
-        # 返回空结果
+    spot_raw = _fetch_etf_spot()
+
+    # 若获取失败，返回空结果结构
+    if spot_raw.empty:
         return pd.DataFrame({
-            "code": codes,
-            "flow_signal": ["neutral"] * len(codes),
-            "label": [""] * len(codes),
-            "scale": [np.nan] * len(codes),
+            "code":         codes,
+            "flow_signal":  ["neutral"] * len(codes),
+            "label":        [""] * len(codes),
+            "turnover":     [np.nan] * len(codes),
+            "rel_turnover": [np.nan] * len(codes),
+            "rs":           [np.nan] * len(codes),
+            "is_broad_base": [c in _BROAD_BASE_ETFS for c in codes],
         })
 
-    # 标准化列名（东方财富不同版本列名可能不同）
-    col_map = {}
-    for col in spot_df.columns:
-        col_s = str(col)
-        if "代码" in col_s or col_s == "symbol":
-            col_map["code"] = col
-        elif "名称" in col_s:
-            col_map["name"] = col
-        elif "规模" in col_s or "资产" in col_s or "份额" in col_s:
-            col_map["scale"] = col
-        elif "涨跌幅" in col_s or "涨跌%" in col_s:
-            col_map["chg_pct"] = col
-        elif "成交额" in col_s:
-            col_map["amount"] = col
-        elif "流入" in col_s and "净" in col_s:
-            col_map["net_inflow"] = col
-
-    if "code" not in col_map:
-        logger.warning("[资金流] ETF实时数据列名无法识别，跳过资金流分析")
+    spot = _normalize_spot(spot_raw)
+    if spot.empty:
         return pd.DataFrame({
-            "code": codes,
-            "flow_signal": ["neutral"] * len(codes),
-            "label": [""] * len(codes),
-            "scale": [np.nan] * len(codes),
+            "code":         codes,
+            "flow_signal":  ["neutral"] * len(codes),
+            "label":        [""] * len(codes),
+            "turnover":     [np.nan] * len(codes),
+            "rel_turnover": [np.nan] * len(codes),
+            "rs":           [np.nan] * len(codes),
+            "is_broad_base": [c in _BROAD_BASE_ETFS for c in codes],
         })
 
-    # 只保留我们关注的ETF
-    spot_df = spot_df.rename(columns={v: k for k, v in col_map.items()})
-    spot_df["code"] = spot_df["code"].astype(str).str.strip()
-    filtered = spot_df[spot_df["code"].isin(codes)].copy()
+    # 只保留池内ETF
+    pool = spot[spot["code"].isin(codes)].copy()
 
-    # 转换数值列
-    for col in ["scale", "chg_pct", "net_inflow", "amount"]:
-        if col in filtered.columns:
-            filtered[col] = pd.to_numeric(filtered[col], errors="coerce")
+    # ── 计算换手率 ────────────────────────────────────────────
+    # amount 单位：元（东财）→ 转亿；scale 单位：亿
+    # 若 amount 量级过大（>1e8）认为是元，否则已经是亿
+    if pool["amount"].median() > 1e8:
+        pool["amount_yi"] = pool["amount"] / 1e8
+    else:
+        pool["amount_yi"] = pool["amount"]
 
-    # ── 资金流信号判断 ────────────────────────────────────────
+    # turnover(%) = 成交额(亿) / 规模(亿) × 100
+    pool["turnover"] = np.where(
+        (pool["scale"] > 0) & pool["scale"].notna(),
+        pool["amount_yi"] / pool["scale"] * 100,
+        np.nan,
+    )
+
+    # 若规模缺失，退化为池内相对成交额排名（用成交额替代换手率）
+    if pool["turnover"].isna().all():
+        logger.info("[资金流v2] 规模字段缺失，改用成交额相对排名")
+        pool["turnover"] = pool["amount_yi"]
+
+    # 相对换手率 = 个股换手率 / 池内中位数换手率
+    median_to = pool["turnover"].median()
+    if median_to and median_to > 0:
+        pool["rel_turnover"] = pool["turnover"] / median_to
+    else:
+        pool["rel_turnover"] = np.nan
+
+    # ── ETF 相对强弱（vs 沪深300）────────────────────────────
+    hs300_chg = _get_hs300_chg(pool)
+    pool["rs"] = pool["chg_pct"] - hs300_chg  # NaN - NaN = NaN，安全
+
+    # ── 信号判断 ──────────────────────────────────────────────
     records = []
-    code_set = set(filtered["code"].tolist()) if not filtered.empty else set()
-
     for code in codes:
         is_broad = code in _BROAD_BASE_ETFS
-        row = filtered[filtered["code"] == code]
+        row = pool[pool["code"] == code]
 
-        if row.empty or "net_inflow" not in filtered.columns:
-            # 没有净流入数据，用成交额代理
+        if row.empty:
             records.append({
-                "code": code,
-                "flow_signal": "neutral",
-                "label": "",
-                "scale": np.nan,
-                "is_broad_base": is_broad,
+                "code": code, "flow_signal": "neutral", "label": "",
+                "turnover": np.nan, "rel_turnover": np.nan,
+                "rs": np.nan, "is_broad_base": is_broad,
             })
             continue
 
-        net_in  = float(row["net_inflow"].iloc[0]) if "net_inflow" in row else np.nan
-        scale   = float(row["scale"].iloc[0])       if "scale" in row    else np.nan
-        chg_pct = float(row["chg_pct"].iloc[0])     if "chg_pct" in row  else np.nan
-        name    = str(row["name"].iloc[0])           if "name" in row     else code
+        r          = row.iloc[0]
+        rel_to     = r["rel_turnover"] if not pd.isna(r["rel_turnover"]) else 1.0
+        chg        = r["chg_pct"]      if not pd.isna(r["chg_pct"])      else 0.0
+        rs_val     = r["rs"]           if not pd.isna(r["rs"])           else float("nan")
+        to_val     = r["turnover"]     if not pd.isna(r["turnover"])     else float("nan")
+        name       = r.get("name", code) if "name" in r.index else code
 
-        # 流入信号
-        if not np.isnan(net_in):
-            if net_in > 2:
+        # ── 量价配合信号 ──────────────────────────────────────
+        if rel_to >= _REL_STRONG:
+            if chg >= _PRICE_UP:
                 signal = "strong_in"
                 prefix = "🏛️国家队" if is_broad else "🏦机构"
-                label  = f"{prefix}大幅流入+{net_in:.1f}亿"
-            elif net_in > 0.5:
-                signal = "mild_in"
-                label  = f"资金小幅流入+{net_in:.1f}亿"
-            elif net_in < -2:
+                label  = f"{prefix}大幅放量 {rel_to:.1f}x↑{chg:+.1f}%"
+            elif chg <= _PRICE_DOWN:
                 signal = "strong_out"
-                label  = f"资金大幅流出{net_in:.1f}亿"
-            elif net_in < -0.5:
+                label  = f"⚠️大幅放量砸盘 {rel_to:.1f}x{chg:+.1f}%"
+            else:
+                signal = "active"     # 放量但价格横盘，多空争夺
+                label  = f"🔄放量博弈 {rel_to:.1f}x（方向不明）"
+        elif rel_to >= _REL_MILD:
+            if chg >= _PRICE_UP:
+                signal = "mild_in"
+                label  = f"温和放量上涨 {rel_to:.1f}x↑{chg:+.1f}%"
+            elif chg <= _PRICE_DOWN:
                 signal = "mild_out"
-                label  = f"资金小幅流出{net_in:.1f}亿"
+                label  = f"温和放量下跌 {rel_to:.1f}x{chg:+.1f}%"
             else:
                 signal = "neutral"
                 label  = ""
+        elif rel_to <= _REL_QUIET:
+            signal = "quiet"
+            label  = f"🔕缩量观望 {rel_to:.1f}x（流动性差）"
         else:
             signal = "neutral"
             label  = ""
 
+        # ── 相对强弱补充标注 ──────────────────────────────────
+        if not pd.isna(rs_val):
+            if rs_val >= _RS_STRONG and signal not in ("strong_out", "mild_out"):
+                label += f"  💪跑赢300 {rs_val:+.1f}%"
+            elif rs_val <= _RS_WEAK and signal not in ("strong_in", "mild_in"):
+                label += f"  🐢跑输300 {rs_val:+.1f}%"
+
         records.append({
-            "code":          code,
-            "flow_signal":   signal,
-            "label":         label,
-            "scale":         scale,
+            "code":         code,
+            "flow_signal":  signal,
+            "label":        label.strip(),
+            "turnover":     round(to_val, 3) if not pd.isna(to_val) else np.nan,
+            "rel_turnover": round(rel_to, 2),
+            "rs":           round(rs_val, 2) if not pd.isna(rs_val) else np.nan,
             "is_broad_base": is_broad,
         })
 
     df = pd.DataFrame(records)
 
-    # 排序：strong_in > mild_in > neutral > mild_out > strong_out
-    order = {"strong_in": 0, "mild_in": 1, "neutral": 2, "mild_out": 3, "strong_out": 4}
-    df["_sort"] = df["flow_signal"].map(order).fillna(2)
+    # 排序：strong_in > mild_in > active > quiet > neutral > mild_out > strong_out
+    order = {"strong_in": 0, "mild_in": 1, "active": 2,
+             "quiet": 3, "neutral": 4, "mild_out": 5, "strong_out": 6}
+    df["_sort"] = df["flow_signal"].map(order).fillna(4)
     df = df.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
     return df
 
 
 def summarize_fund_flow(flow_df: pd.DataFrame) -> str:
-    """生成资金流向一句话摘要，用于报告顶部（显示代码+名称）。"""
+    """生成资金流向一句话摘要，用于报告顶部。"""
     if flow_df.empty:
         return ""
     from src.data.stock_mapping import STOCK_NAME_MAP
@@ -199,17 +272,23 @@ def summarize_fund_flow(flow_df: pd.DataFrame) -> str:
     def _fmt(row) -> str:
         code = row["code"]
         name = STOCK_NAME_MAP.get(code, code)
-        return f"{name}({code})"
+        label = row.get("label", "")
+        return f"{name}({code})" + (f"[{label}]" if label else "")
 
     strong_in  = flow_df[flow_df["flow_signal"] == "strong_in"]
     strong_out = flow_df[flow_df["flow_signal"] == "strong_out"]
+    quiet_cnt  = (flow_df["flow_signal"] == "quiet").sum()
     parts = []
+
     if not strong_in.empty:
+        broad_in = strong_in[strong_in["is_broad_base"]]
+        prefix = "🏛️国家队大幅放量" if not broad_in.empty else "🏦机构大幅放量"
         items  = "、".join(strong_in.apply(_fmt, axis=1).tolist())
-        broad  = strong_in[strong_in["is_broad_base"]]
-        prefix = "🏛️国家队信号" if not broad.empty else "🏦机构大幅流入"
         parts.append(f"{prefix}：{items}")
     if not strong_out.empty:
         items = "、".join(strong_out.apply(_fmt, axis=1).tolist())
-        parts.append(f"⚠️资金大幅流出：{items}")
-    return "　｜　".join(parts)
+        parts.append(f"⚠️放量砸盘：{items}")
+    if quiet_cnt >= 10:
+        parts.append(f"🔕{quiet_cnt}只ETF缩量观望，市场情绪低迷")
+
+    return "　｜　".join(parts) if parts else ""

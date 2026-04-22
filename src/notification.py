@@ -340,7 +340,7 @@ class NotificationService(
             mo_rank = momentum_map.get(r.code, {}).get("rank")
             if mo_rank is not None and not (isinstance(mo_rank, float) and np.isnan(mo_rank)) and int(mo_rank) <= mo_top:
                 score += 1
-            if flow_signal_map.get(r.code, "") in ("strong_in", "mild_in"):
+            if flow_signal_map.get(r.code, "") in ("strong_in", "mild_in", "active"):
                 score += 1
             return score
 
@@ -383,49 +383,63 @@ class NotificationService(
         if flow_df is not None and not flow_df.empty and "flow_signal" in flow_df.columns:
             from src.data.stock_mapping import STOCK_NAME_MAP as _NAME_MAP
 
-            def _bar(val, max_v, width=12):
-                if max_v == 0 or val == 0:
+            def _bar(val, max_v, width=10):
+                if not max_v or not val or max_v == 0:
                     return ""
                 return "█" * max(1, round(abs(val) / max_v * width))
 
-            in_rows  = flow_df[flow_df["flow_signal"].isin(["strong_in", "mild_in"])].copy()
-            out_rows = flow_df[flow_df["flow_signal"].isin(["strong_out", "mild_out"])].copy()
+            in_rows   = flow_df[flow_df["flow_signal"].isin(["strong_in", "mild_in"])].copy()
+            out_rows  = flow_df[flow_df["flow_signal"].isin(["strong_out", "mild_out"])].copy()
+            active_rows = flow_df[flow_df["flow_signal"] == "active"].copy()
 
-            # 尝试提取净流入数值（从 label 解析）
-            def _parse_amount(label: str) -> float:
-                import re
-                m = re.search(r'([+-]?\d+\.?\d*)', label or "")
-                return float(m.group(1)) if m else 0.0
+            # 按相对换手率排序
+            rel_col = "rel_turnover"
+            if rel_col in flow_df.columns:
+                in_rows   = in_rows.sort_values(rel_col, ascending=False).head(6)
+                out_rows  = out_rows.sort_values(rel_col, ascending=False).head(4)
+                active_rows = active_rows.sort_values(rel_col, ascending=False).head(3)
 
-            in_rows["amount"]  = in_rows["label"].apply(_parse_amount)
-            out_rows["amount"] = out_rows["label"].apply(lambda x: -abs(_parse_amount(x)))
-            in_rows  = in_rows.sort_values("amount",  ascending=False).head(6)
-            out_rows = out_rows.sort_values("amount").head(6)
-
-            lines += ["## 💰 今日资金动向", ""]
+            lines += ["## 💰 今日资金动向（量价配合）", ""]
 
             if not in_rows.empty:
-                max_in = in_rows["amount"].max() or 1
-                lines.append("**净流入（机构/国家队买入）**")
+                max_rt = in_rows[rel_col].max() if rel_col in in_rows.columns else 1
+                lines.append("**放量上涨（资金主动买入）**")
                 lines.append("```")
                 for _, row in in_rows.iterrows():
-                    name  = _NAME_MAP.get(row["code"], row["code"])
-                    amt   = row["amount"]
+                    name   = _NAME_MAP.get(row["code"], row["code"])
+                    rt     = row.get(rel_col, float("nan"))
+                    rs     = row.get("rs", float("nan"))
                     prefix = "🏛️" if row.get("is_broad_base") else "🏦"
-                    bar   = _bar(amt, max_in)
-                    lines.append(f"{prefix} {name}({row['code']})  +{amt:.1f}亿  {bar}")
+                    bar    = _bar(rt, max_rt)
+                    rs_str = f"  vs300:{rs:+.1f}%" if not pd.isna(rs) else ""
+                    rt_str = f"{rt:.1f}x" if not pd.isna(rt) else "—"
+                    lines.append(f"{prefix} {name}({row['code']})  量比{rt_str}  {bar}{rs_str}")
                 lines.append("```")
                 lines.append("")
 
             if not out_rows.empty:
-                max_out = abs(out_rows["amount"].min()) or 1
-                lines.append("**净流出（注意风险）**")
+                max_rt = out_rows[rel_col].max() if rel_col in out_rows.columns else 1
+                lines.append("**放量下跌（资金主动卖出）**")
                 lines.append("```")
                 for _, row in out_rows.iterrows():
+                    name   = _NAME_MAP.get(row["code"], row["code"])
+                    rt     = row.get(rel_col, float("nan"))
+                    rs     = row.get("rs", float("nan"))
+                    bar    = _bar(rt, max_rt)
+                    rs_str = f"  vs300:{rs:+.1f}%" if not pd.isna(rs) else ""
+                    rt_str = f"{rt:.1f}x" if not pd.isna(rt) else "—"
+                    lines.append(f"⚠️ {name}({row['code']})  量比{rt_str}  {bar}{rs_str}")
+                lines.append("```")
+                lines.append("")
+
+            if not active_rows.empty:
+                lines.append("**放量博弈（多空争夺，方向待定）**")
+                lines.append("```")
+                for _, row in active_rows.iterrows():
                     name = _NAME_MAP.get(row["code"], row["code"])
-                    amt  = abs(row["amount"])
-                    bar  = _bar(amt, max_out)
-                    lines.append(f"⚠️ {name}({row['code']})  -{amt:.1f}亿  {bar}")
+                    rt   = row.get(rel_col, float("nan"))
+                    rt_str = f"{rt:.1f}x" if not pd.isna(rt) else "—"
+                    lines.append(f"🔄 {name}({row['code']})  量比{rt_str}")
                 lines.append("```")
                 lines.append("")
 
