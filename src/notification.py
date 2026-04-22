@@ -1190,39 +1190,51 @@ class NotificationService(
         # ── 大盘择时信号 ──────────────────────────────────────
         timing = {"final_position": 2, "summary": "", "error": "未运行",
                   "rsrs_signal": None, "alligator_state": "neutral",
-                  "jaw": None, "teeth": None, "lips": None}
+                  "ma_state": "neutral", "roc": None, "rsi": None,
+                  "vote_detail": {}, "vote_total": 0, "override_reason": None,
+                  "jaw": None, "teeth": None, "lips": None,
+                  "ma20": None, "ma60": None}
         try:
             from src.core.market_timing import get_market_timing
             timing = get_market_timing()
         except Exception as e:
             timing["error"] = str(e)
 
-        final_pos  = timing.get("final_position", 2)   # 0=空仓 1=半仓 2=满仓
-        self._last_timing_final_pos = final_pos  # 供报告顶部市场定性使用
+        final_pos  = timing.get("final_position", 2)
+        self._last_timing_final_pos = final_pos
         rsrs_val   = timing.get("rsrs_signal")
         ali_state  = timing.get("alligator_state", "neutral")
+        ma_state   = timing.get("ma_state", "neutral")
+        roc_val    = timing.get("roc")
+        rsi_val    = timing.get("rsi")
+        vote_detail = timing.get("vote_detail", {})
+        vote_total  = timing.get("vote_total", 0)
+        override_reason = timing.get("override_reason")
         timing_err = timing.get("error")
 
         ali_emoji = {"bull": "🐊饥饿（多头）", "bear": "🐊吃饱（空头）",
                      "neutral": "🐊沉睡（震荡）"}.get(ali_state, ali_state)
+        ma_emoji  = {"bull": "📈多头排列", "bear": "📉空头排列",
+                     "neutral": "➡️震荡整理"}.get(ma_state, ma_state)
+
         if rsrs_val is None:
             rsrs_str  = "N/A"
             rsrs_desc = "数据不足"
         elif rsrs_val >= 0.7:
             rsrs_str  = f"{rsrs_val:.3f}"
-            rsrs_desc = "强势区间，满仓信号"
+            rsrs_desc = "强势区间"
         elif rsrs_val >= 0.3:
             rsrs_str  = f"{rsrs_val:.3f}"
-            rsrs_desc = "温和看多，需鳄鱼线确认"
+            rsrs_desc = "温和看多"
         elif rsrs_val >= 0:
             rsrs_str  = f"{rsrs_val:.3f}"
-            rsrs_desc = "弱多，偏谨慎"
+            rsrs_desc = "弱多偏谨慎"
         elif rsrs_val >= -0.7:
             rsrs_str  = f"{rsrs_val:.3f}"
-            rsrs_desc = "中性偏弱，观望"
+            rsrs_desc = "中性偏弱"
         else:
             rsrs_str  = f"{rsrs_val:.3f}"
-            rsrs_desc = "空头区间，空仓信号"
+            rsrs_desc = "空头区间"
 
         # ── 读取持仓 ─────────────────────────────────────────
         portfolio   = self._load_portfolio()
@@ -1349,19 +1361,37 @@ class NotificationService(
                 position_note  = f"大盘看多，{etf_n}个ETF信号，满仓分散持有"
             effective_n = etf_n
 
+        # ── 投票得分显示 ─────────────────────────────────────
+        def _vote_icon(v: int) -> str:
+            return {1: "🟢", 0: "⚪", -1: "🔴"}.get(v, "⚪")
+
+        vote_bar = "  ".join(
+            f"{name}{_vote_icon(v)}" for name, v in vote_detail.items()
+        ) if vote_detail else "—"
+
         lines = [
             "## 🚀 今日操作指令",
             "",
             f"**仓位状态：{position_label}**　　总资金：¥{total_capital:,}　　可用资金：¥{available_cash:,.0f}",
             "",
-            "**大盘择时指标**",
-            f"- RSRS钝化值：`{rsrs_str}` → {rsrs_desc}",
-            f"- 鳄鱼线状态：{ali_emoji}",
+            f"**大盘择时（五指标投票：{vote_total}/5）**",
+            f"- {vote_bar}",
+            f"- RSRS钝化：`{rsrs_str}` {rsrs_desc}",
+            f"- 鳄鱼线：{ali_emoji}",
+            f"- MA20/60：{ma_emoji}"
+            + (f"（MA20={timing['ma20']}  MA60={timing['ma60']}）" if timing.get("ma20") and timing.get("ma60") else ""),
+            f"- ROC20：`{roc_val:+.1f}%`" if roc_val is not None else "- ROC20：N/A",
+            f"- RSI14：`{rsi_val:.1f}`" + (
+                "  超买区" if rsi_val and rsi_val > 70 else
+                "  超卖区" if rsi_val and rsi_val < 30 else ""
+            ) if rsi_val is not None else "- RSI14：N/A",
         ]
 
+        if override_reason:
+            lines.append(f"- ⚠️ **风控override**：{override_reason}")
         if timing.get("jaw") and timing.get("teeth") and timing.get("lips"):
             lines.append(
-                f"- 三线数值：下颚 {timing['jaw']} ｜ 牙齿 {timing['teeth']} ｜ 上唇 {timing['lips']}"
+                f"- 鳄鱼三线：下颚 {timing['jaw']} ｜ 牙齿 {timing['teeth']} ｜ 上唇 {timing['lips']}"
             )
         if timing_err:
             lines.append(f"- ⚠️ 择时计算备注：{timing_err}")
