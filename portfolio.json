@@ -1,4 +1,23 @@
 {
   "total_capital": 20000,
-  "positions": {}
+  "positions": {
+    "588000": {
+      "name": "科创50ETF华夏",
+      "shares": 200,
+      "cost_price": 1.508,
+      "buy_date": "2026-04-23",
+      "stop_loss_pct": 0.05,
+      "confirmed": false,
+      "auto_note": "系统推荐，AI评分74/100"
+    },
+    "513100": {
+      "name": "纳指ETF国泰",
+      "shares": 200,
+      "cost_price": 1.905,
+      "buy_date": "2026-04-23",
+      "stop_loss_pct": 0.05,
+      "confirmed": false,
+      "auto_note": "系统推荐，AI评分70/100"
+    }
+  }
 }
