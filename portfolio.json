@@ -1,14 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "515390": {
-      "name": "沪深300ETF华安",
-      "shares": 200,
-      "cost_price": 1.392,
-      "buy_date": "2026-04-23",
+    "512660": {
+      "name": "军工ETF国泰",
+      "shares": 100,
+      "cost_price": 1.396,
+      "buy_date": "2026-04-24",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分72/100"
+      "auto_note": "系统推荐，AI评分86/100"
     }
   }
 }
