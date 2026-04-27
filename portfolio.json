@@ -1,14 +1,4 @@
 {
   "total_capital": 20000,
-  "positions": {
-    "512660": {
-      "name": "军工ETF国泰",
-      "shares": 100,
-      "cost_price": 1.396,
-      "buy_date": "2026-04-24",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分86/100"
-    }
-  }
+  "positions": {}
 }
