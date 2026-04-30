@@ -4,11 +4,11 @@
     "516220": {
       "name": "化工ETF国泰",
       "shares": 100,
-      "cost_price": 1.06,
-      "buy_date": "2026-04-29",
+      "cost_price": 1.054,
+      "buy_date": "2026-04-30",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分62/100"
+      "auto_note": "系统推荐，AI评分80/100"
     }
   }
 }
