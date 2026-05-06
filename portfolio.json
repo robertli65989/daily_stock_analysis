@@ -1,14 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "516220": {
-      "name": "化工ETF国泰",
-      "shares": 100,
-      "cost_price": 1.054,
-      "buy_date": "2026-04-30",
+    "513500": {
+      "name": "标普500ETF博时",
+      "shares": 200,
+      "cost_price": 2.454,
+      "buy_date": "2026-05-06",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分80/100"
+      "auto_note": "系统推荐，AI评分63/100"
     }
   }
 }
