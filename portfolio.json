@@ -1,14 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "513500": {
-      "name": "标普500ETF博时",
-      "shares": 200,
-      "cost_price": 2.454,
-      "buy_date": "2026-05-06",
+    "512000": {
+      "name": "券商ETF华宝",
+      "shares": 2300,
+      "cost_price": 0.521,
+      "buy_date": "2026-05-07",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分63/100"
+      "auto_note": "系统推荐，AI评分77/100"
     }
   }
 }
