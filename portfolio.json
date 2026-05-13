@@ -3,30 +3,12 @@
   "positions": {
     "515790": {
       "name": "光伏ETF华泰柏瑞",
-      "shares": 500,
-      "cost_price": 1.122,
-      "buy_date": "2026-05-12",
+      "shares": 1500,
+      "cost_price": 1.146,
+      "buy_date": "2026-05-13",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分80/100"
-    },
-    "510300": {
-      "name": "沪深300ETF华泰柏瑞",
-      "shares": 100,
-      "cost_price": 4.963,
-      "buy_date": "2026-05-12",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分65/100"
-    },
-    "516220": {
-      "name": "化工ETF国泰",
-      "shares": 300,
-      "cost_price": 1.019,
-      "buy_date": "2026-05-12",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分65/100"
+      "auto_note": "系统推荐，AI评分70/100"
     }
   }
 }
