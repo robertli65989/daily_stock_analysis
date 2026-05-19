@@ -1,23 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "159915": {
-      "name": "创业板ETF易方达",
-      "shares": 100,
-      "cost_price": 3.923,
-      "buy_date": "2026-05-18",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分82/100"
-    },
     "515790": {
       "name": "光伏ETF华泰柏瑞",
-      "shares": 300,
-      "cost_price": 1.101,
-      "buy_date": "2026-05-18",
+      "shares": 700,
+      "cost_price": 1.117,
+      "buy_date": "2026-05-19",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分77/100"
+      "auto_note": "系统推荐，AI评分65/100"
     }
   }
 }
