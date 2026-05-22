@@ -1,14 +1,4 @@
 {
   "total_capital": 20000,
-  "positions": {
-    "512480": {
-      "name": "半导体ETF国联安",
-      "shares": 4600,
-      "cost_price": 2.132,
-      "buy_date": "2026-05-21",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分70/100"
-    }
-  }
+  "positions": {}
 }
