@@ -1,14 +1,23 @@
 {
   "total_capital": 20000,
   "positions": {
-    "515880": {
-      "name": "通信ETF国泰",
-      "shares": 6400,
-      "cost_price": 1.539,
-      "buy_date": "2026-05-27",
+    "588000": {
+      "name": "科创50ETF华夏",
+      "shares": 2800,
+      "cost_price": 1.942,
+      "buy_date": "2026-05-28",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分82/100"
+      "auto_note": "系统推荐，AI评分71/100"
+    },
+    "513500": {
+      "name": "标普500ETF博时",
+      "shares": 1800,
+      "cost_price": 2.524,
+      "buy_date": "2026-05-28",
+      "stop_loss_pct": 0.05,
+      "confirmed": false,
+      "auto_note": "系统推荐，AI评分74/100"
     }
   }
 }
