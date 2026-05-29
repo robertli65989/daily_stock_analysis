@@ -1,23 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "588000": {
-      "name": "科创50ETF华夏",
-      "shares": 2800,
-      "cost_price": 1.942,
-      "buy_date": "2026-05-28",
+    "159915": {
+      "name": "创业板ETF易方达",
+      "shares": 2400,
+      "cost_price": 4.053,
+      "buy_date": "2026-05-29",
       "stop_loss_pct": 0.05,
       "confirmed": false,
       "auto_note": "系统推荐，AI评分71/100"
-    },
-    "513500": {
-      "name": "标普500ETF博时",
-      "shares": 1800,
-      "cost_price": 2.524,
-      "buy_date": "2026-05-28",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分74/100"
     }
   }
 }
