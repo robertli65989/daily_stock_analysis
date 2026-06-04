@@ -1,14 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "159659": {
-      "name": "纳斯达克100ETF招商",
-      "shares": 4100,
-      "cost_price": 2.406,
-      "buy_date": "2026-06-03",
+    "159915": {
+      "name": "创业板ETF易方达",
+      "shares": 2400,
+      "cost_price": 4.1,
+      "buy_date": "2026-06-04",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分68/100"
+      "auto_note": "系统推荐，AI评分85/100"
     }
   }
 }
