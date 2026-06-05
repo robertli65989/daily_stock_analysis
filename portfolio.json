@@ -1,14 +1,14 @@
 {
   "total_capital": 20000,
   "positions": {
-    "159915": {
-      "name": "创业板ETF易方达",
-      "shares": 2400,
-      "cost_price": 4.1,
-      "buy_date": "2026-06-04",
+    "510880": {
+      "name": "红利ETF华泰柏瑞",
+      "shares": 3000,
+      "cost_price": 3.321,
+      "buy_date": "2026-06-05",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分85/100"
+      "auto_note": "系统推荐，AI评分80/100"
     }
   }
 }
