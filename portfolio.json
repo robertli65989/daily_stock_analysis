@@ -1,14 +1,4 @@
 {
   "total_capital": 20000,
-  "positions": {
-    "515220": {
-      "name": "煤炭ETF国泰",
-      "shares": 7300,
-      "cost_price": 1.36,
-      "buy_date": "2026-06-09",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分70/100"
-    }
-  }
+  "positions": {}
 }
