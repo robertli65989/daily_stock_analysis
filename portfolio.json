@@ -1,32 +1,23 @@
 {
   "total_capital": 20000,
   "positions": {
+    "516220": {
+      "name": "化工ETF国泰",
+      "shares": 5100,
+      "cost_price": 0.99,
+      "buy_date": "2026-06-25",
+      "stop_loss_pct": 0.05,
+      "confirmed": false,
+      "auto_note": "系统推荐，AI评分70/100"
+    },
     "159845": {
       "name": "中证1000ETF华夏",
       "shares": 1100,
-      "cost_price": 3.638,
-      "buy_date": "2026-06-24",
+      "cost_price": 3.66,
+      "buy_date": "2026-06-25",
       "stop_loss_pct": 0.05,
       "confirmed": false,
-      "auto_note": "系统推荐，AI评分75/100"
-    },
-    "510500": {
-      "name": "中证500ETF南方",
-      "shares": 300,
-      "cost_price": 8.985,
-      "buy_date": "2026-06-24",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分71/100"
-    },
-    "516220": {
-      "name": "化工ETF国泰",
-      "shares": 2500,
-      "cost_price": 0.992,
-      "buy_date": "2026-06-24",
-      "stop_loss_pct": 0.05,
-      "confirmed": false,
-      "auto_note": "系统推荐，AI评分65/100"
+      "auto_note": "系统推荐，AI评分63/100"
     }
   }
 }
