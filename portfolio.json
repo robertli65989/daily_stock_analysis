@@ -1,4 +1,14 @@
 {
   "total_capital": 20000,
-  "positions": {}
+  "positions": {
+    "512000": {
+      "name": "券商ETF华宝",
+      "shares": 18200,
+      "cost_price": 0.549,
+      "buy_date": "2026-07-02",
+      "stop_loss_pct": 0.05,
+      "confirmed": false,
+      "auto_note": "系统推荐，AI评分80/100"
+    }
+  }
 }
